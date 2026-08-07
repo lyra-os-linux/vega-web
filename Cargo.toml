@@ -1,0 +1,23 @@
+[package]
+name = "vega-web"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+rust-version.workspace = true
+homepage.workspace = true
+description = "Interface web HTTPS (somente LAN) do centro de controle Vega"
+
+[dependencies]
+lyra-vega-dbus = { path = "../lyra-vega-dbus" }
+tokio = { version = "1.48.0", features = ["rt-multi-thread", "macros", "signal"] }
+axum = "0.8.9"
+axum-server = { version = "0.8.0", features = ["tls-rustls-no-provider"] }
+axum-extra = { version = "0.12.6", features = ["cookie", "cookie-private"] }
+rustls = { version = "0.23.35", default-features = false, features = ["ring", "std"] }
+rcgen = "0.14.8"
+rand = "0.10.2"
+time = { version = "0.3.55", features = ["formatting"] }
+libc = "0.2.189"
+serde = { version = "1.0.228", features = ["derive"] }
+gettext-rs = { version = "0.7.7", features = ["gettext-system"] }

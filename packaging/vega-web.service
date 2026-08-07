@@ -1,0 +1,20 @@
+[Unit]
+Description=Vega web control panel (HTTPS, LAN)
+Documentation=https://lyraos.org/vega
+After=network.target vegad.service
+
+[Service]
+ExecStart=/usr/lib/vega/vega-web
+User=vega-web
+Group=vega-web
+Environment=VEGA_WEB_BIND=0.0.0.0:9090
+Environment=VEGA_WEB_TLS_DIR=/etc/vega/web/tls
+Environment=VEGA_WEB_PAM_SERVICE=vega-web
+Restart=on-failure
+RestartSec=5
+
+# Ao contrário do vegad (ativado sob demanda pelo D-Bus), o vega-web é um
+# serviço de rede de longa duração — precisa de [Install] para
+# "systemctl enable --now vega-web".
+[Install]
+WantedBy=multi-user.target
