@@ -19,12 +19,18 @@ pub async fn handler(
             body.push_str(&format!(
                 r#"<div class="cards">
 <div class="card">CPU<strong>{:.1}%</strong></div>
+<div class="card">GPU<strong>{}</strong></div>
 <div class="card">Memória<strong>{} / {}</strong></div>
 <div class="card">Swap<strong>{} / {}</strong></div>
 <div class="card">Disco (leitura/escrita)<strong>{}/s / {}/s</strong></div>
 <div class="card">Rede (rx/tx)<strong>{}/s / {}/s</strong></div>
 </div>"#,
                 metrics.cpu_percent,
+                if metrics.gpu_percent >= 0.0 {
+                    format!("{:.1}%", metrics.gpu_percent)
+                } else {
+                    "Uso indisponível".into()
+                },
                 format_bytes(metrics.mem_used),
                 format_bytes(metrics.mem_total),
                 format_bytes(metrics.swap_used),
