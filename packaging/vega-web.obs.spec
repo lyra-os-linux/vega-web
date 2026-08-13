@@ -49,9 +49,12 @@ e sem alterar as regras de polkit já usadas pelo vega-gtk/vega-cli.
 
 %prep
 %setup -q -n vega-src-%{version}
-# .cargo/config.toml + Cargo.lock + vendor/ vão na raiz do workspace,
-# junto do Cargo.toml — é onde o cargo procura por padrão.
-tar xzf %{SOURCE1}
+# .cargo/config.toml + vendor/ vão na raiz do workspace, junto do
+# Cargo.toml — é onde o cargo procura por padrão.
+# O vendor.tar.gz pode ter sido gerado numa release anterior. Preserve o
+# Cargo.lock da tag atual; o tar fornece apenas a configuração offline e os
+# crates vendorizados.
+tar --anchored --exclude=Cargo.lock -xzf %{SOURCE1}
 
 %build
 cd vega-web
