@@ -16,7 +16,10 @@ pub async fn handler(
     let status = state.dbus.system().status().await;
     let services = state.dbus.services().list().await;
     let snapshots_available = state.dbus.snapshots().available().await;
-    let updates = state.dbus.software().list_native_updates().await;
+    // Every administrative login lands here. The daemon answers from its
+    // bounded cache and starts one deduplicated refresh when that cache is
+    // stale, so repository latency never blocks access to the dashboard.
+    let updates = state.dbus.software().request_update_check().await;
     let metadata = state.dbus.metadata().metadata().await;
 
     let mut body = String::new();
@@ -29,10 +32,18 @@ pub async fn handler(
     }
 
     match updates {
-        Ok(updates) if updates.is_empty() => body.push_str("<p><strong>Atualizações:</strong> sistema em dia.</p>"),
-        Ok(updates) => body.push_str(&format!(
+        Ok(status) if !status.error.is_empty() => body.push_str(&error_body(
+            "Última verificação de atualizações falhou",
+            html_escape(&status.error),
+        )),
+        Ok(status) if status.in_progress => body.push_str(&format!(
+            "<p><strong>Atualizações:</strong> verificação em andamento; último estado: {} pacote(s) pendente(s).</p>",
+            status.total_count
+        )),
+        Ok(status) if status.total_count == 0 => body.push_str("<p><strong>Atualizações:</strong> sistema em dia.</p>"),
+        Ok(status) => body.push_str(&format!(
             r#"<p class="notice"><strong>Atenção:</strong> {} atualização(ões) pendente(s). <a href="/software?tab=updates">Revisar atualizações</a>.</p>"#,
-            updates.len()
+            status.total_count
         )),
         Err(error) => body.push_str(&error_body("Não foi possível verificar atualizações", error)),
     }
