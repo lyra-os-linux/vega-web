@@ -39,13 +39,13 @@ pub async fn handler(
     ));
 
     if !query.q.trim().is_empty() {
-        match client.search(query.q.trim()).await {
+        match client.search_native(query.q.trim()).await {
             Ok(results) => body.push_str(&package_table("Resultados da busca", &results)),
             Err(error) => body.push_str(&error_body("Busca indisponível", error)),
         }
     }
 
-    match client.list_updates().await {
+    match client.list_native_updates().await {
         Ok(updates) => body.push_str(&package_table("Atualizações disponíveis", &updates)),
         Err(error) => body.push_str(&error_body("Lista de atualizações indisponível", error)),
     }

@@ -1,5 +1,4 @@
 pub mod backup;
-pub mod bluetooth;
 pub mod dashboard;
 pub mod datetime;
 pub mod hardware;

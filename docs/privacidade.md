@@ -11,7 +11,8 @@ confiável.
 (LAN doméstica/escritório). Ele não tem certificado de uma autoridade
 pública — o certificado é autoassinado, gerado na própria máquina no
 primeiro start. Isso significa que **todo navegador vai mostrar um aviso de
-"conexão não seguro/certificado inválido"** na primeira visita; isso é
+"autoridade não confiável"** na primeira visita; o nome usado no acesso deve
+estar em `VEGA_WEB_TLS_NAMES`, evitando também um erro de identidade. Isso é
 esperado e não indica um ataque, mas também significa que não há proteção
 automática contra um servidor falso se impersonando na rede — só use em
 redes em que você confia nos outros dispositivos.
@@ -38,27 +39,38 @@ dizer que qualquer política que já vale para o login do sistema
 (bloqueio por tentativas, expiração de senha, contas desabilitadas) também
 vale aqui, automaticamente.
 
-## Limitações conhecidas desta versão
+## Proteções operacionais
 
-- **Sem limite de tentativas de login próprio do `vega-web`**: não há
-  *rate limiting* nem bloqueio temporário por IP no próprio serviço — a
-  única proteção contra força bruta vem de módulos PAM que já estejam
-  configurados no sistema (ex. `pam_faillock`), se estiverem. Em uma rede
-  não totalmente confiável, considere colocar o `vega-web` atrás de um
-  proxy com *rate limiting* antes de expô-lo além do essencial.
+- Tentativas de login são limitadas por IP e usuário, com atraso progressivo,
+  recuperação após 15 minutos e no máximo quatro autenticações PAM simultâneas.
+- Sessões expiram após 30 minutos sem atividade ou 12 horas absolutas. O
+  armazenamento aceita até 1024 sessões, no máximo 10 por usuário.
+- Sucessos, falhas, bloqueios e saturação do PAM são registrados no journal,
+  sem registrar senhas.
 - **Sessão em memória**: reiniciar o serviço desloga todo mundo (não é
   vazamento, mas pode surpreender).
 - **Sem 2FA**: só usuário/senha, como qualquer outro consumidor de PAM sem
   módulos adicionais configurados.
-- **Sem auditoria própria**: tentativas de login (sucesso/falha) não geram
-  um log dedicado do `vega-web` ainda — ficam só no journal padrão do PAM
-  do sistema.
+
+Os limites podem ser ajustados por `VEGA_WEB_LOGIN_ATTEMPTS`,
+`VEGA_WEB_LOGIN_RECOVERY_SECS`, `VEGA_WEB_LOGIN_DELAY_MS`,
+`VEGA_WEB_LOGIN_MAX_DELAY_SECS`, `VEGA_WEB_PAM_CONCURRENCY`,
+`VEGA_WEB_SESSION_IDLE_SECS`, `VEGA_WEB_SESSION_MAX_SECS`,
+`VEGA_WEB_SESSION_GLOBAL_LIMIT` e `VEGA_WEB_SESSION_USER_LIMIT`.
+
+## Certificados
+
+O certificado autoassinado inclui os nomes de `VEGA_WEB_TLS_NAMES`. Se esses
+nomes mudarem, o serviço recusa o certificado incompatível e orienta uma
+regeneração explícita. Para certificado administrado externamente, instale
+`cert.pem` e `key.pem` no diretório TLS e defina
+`VEGA_WEB_TLS_EXTERNAL=true`; nesse modo o Vega nunca sobrescreve os arquivos.
 
 ## Se quiser expor além da LAN
 
 Este design deliberadamente não cobre esse caso (ver a pergunta que definiu
 o escopo do projeto). Se decidir fazer isso mesmo assim, no mínimo:
-substitua o certificado autoassinado por um de uma CA pública (ex. via
-proxy reverso com Let's Encrypt), e reavalie a ausência de *rate limiting*
-citada acima — o que é um risco tolerável numa LAN confiável deixa de ser
-tolerável na internet aberta.
+substitua o certificado autoassinado por um de uma CA pública (ex. via proxy
+reverso com Let's Encrypt) e aplique controles adicionais de borda. O rate
+limiting local é uma defesa complementar, não proteção suficiente para
+exposição direta à internet.

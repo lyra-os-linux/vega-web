@@ -248,10 +248,6 @@ const NAV: &[NavGroup] = &[
                 label: "Rede e Firewall",
             },
             NavItem {
-                href: "/bluetooth",
-                label: "Bluetooth",
-            },
-            NavItem {
                 href: "/servicos",
                 label: "Serviços",
             },

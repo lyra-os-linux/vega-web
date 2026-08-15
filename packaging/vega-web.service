@@ -9,9 +9,36 @@ User=vega-web
 Group=vega-web
 Environment=VEGA_WEB_BIND=0.0.0.0:9090
 Environment=VEGA_WEB_TLS_DIR=/etc/vega/web/tls
+Environment=VEGA_WEB_TLS_NAMES=%H,localhost,127.0.0.1,::1
 Environment=VEGA_WEB_PAM_SERVICE=vega-web
 Restart=on-failure
 RestartSec=5
+
+# Serviço de rede sem privilégios: somente TLS e estado efêmero do Vega
+# permanecem graváveis. PAM precisa ler a configuração do host, mas não
+# requer acesso aos diretórios pessoais para pam_authenticate/account.
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/etc/vega/web/tls /var/lib/vega-web
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+ProtectClock=true
+ProtectHostname=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+RestrictNamespaces=true
+RestrictRealtime=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+UMask=0077
 
 # Ao contrário do vegad (ativado sob demanda pelo D-Bus), o vega-web é um
 # serviço de rede de longa duração — precisa de [Install] para

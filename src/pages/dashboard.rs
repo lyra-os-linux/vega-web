@@ -1,6 +1,8 @@
 use axum::extract::{Extension, State};
 use axum::response::Html;
-use lyra_vega_dbus::{ServicesClient, SnapshotsClient, SystemClient};
+use lyra_vega_dbus::{
+    MetadataClient, ServicesClient, SnapshotsClient, SoftwareClient, SystemClient,
+};
 
 use crate::auth::CurrentUser;
 use crate::state::AppState;
@@ -14,8 +16,26 @@ pub async fn handler(
     let status = state.dbus.system().status().await;
     let services = state.dbus.services().list().await;
     let snapshots_available = state.dbus.snapshots().available().await;
+    let updates = state.dbus.software().list_native_updates().await;
+    let metadata = state.dbus.metadata().metadata().await;
 
     let mut body = String::new();
+
+    if let Ok(metadata) = metadata {
+        body.push_str(&format!(
+            "<p>Perfil do servidor: <strong>{}</strong></p>",
+            html_escape(&metadata.profile)
+        ));
+    }
+
+    match updates {
+        Ok(updates) if updates.is_empty() => body.push_str("<p><strong>Atualizações:</strong> sistema em dia.</p>"),
+        Ok(updates) => body.push_str(&format!(
+            r#"<p class="notice"><strong>Atenção:</strong> {} atualização(ões) pendente(s). <a href="/software?tab=updates">Revisar atualizações</a>.</p>"#,
+            updates.len()
+        )),
+        Err(error) => body.push_str(&error_body("Não foi possível verificar atualizações", error)),
+    }
 
     match status {
         Ok(status) => {
