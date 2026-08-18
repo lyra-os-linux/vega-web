@@ -5,6 +5,7 @@ use lyra_vega_dbus::BackupClient;
 use crate::auth::CurrentUser;
 use crate::state::AppState;
 
+use super::widgets::icon_stat;
 use super::{error_body, html_escape, render};
 
 pub async fn handler(
@@ -16,6 +17,11 @@ pub async fn handler(
             if configs.is_empty() {
                 "<p>Nenhuma configuração de backup ainda.</p>".to_string()
             } else {
+                let destinations = configs
+                    .iter()
+                    .map(|config| config.destination.as_str())
+                    .collect::<std::collections::BTreeSet<_>>()
+                    .len();
                 let rows: String = configs
                     .iter()
                     .map(|config| {
@@ -29,11 +35,14 @@ pub async fn handler(
                     })
                     .collect();
                 format!(
-                    r#"<p>Somente leitura nesta versão — criar/rodar backups chega numa fase seguinte.</p>
+                    r#"<div class="cards">{} {}</div>
+<p>Somente leitura nesta versão — criar/rodar backups chega numa fase seguinte.</p>
 <table>
 <thead><tr><th>ID</th><th>Caminhos</th><th>Destino</th><th>Frequência</th></tr></thead>
 <tbody>{rows}</tbody>
-</table>"#
+</table>"#,
+                    icon_stat("backup", "Configurações", &configs.len().to_string()),
+                    icon_stat("storage", "Destinos", &destinations.to_string()),
                 )
             }
         }

@@ -101,11 +101,12 @@ aside {
 }
 nav { display: grid; gap: 1px; }
 nav a {
-  display: block; padding: 0.5rem 0.65rem; border-radius: var(--radius-xs);
+  display: flex; align-items: center; gap: 0.6rem; padding: 0.5rem 0.65rem; border-radius: var(--radius-xs);
   color: var(--text-muted); font-size: 0.86rem; font-weight: 500; text-decoration: none;
   border-left: 2px solid transparent;
   transition: background-color var(--transition), color var(--transition);
 }
+nav a .icon { width: 16px; height: 16px; flex-shrink: 0; opacity: 0.85; }
 nav a:hover { color: var(--text-primary); background: var(--surface-hover); }
 nav a.active { color: var(--accent); background: var(--accent-soft-bg); border-left-color: var(--accent); font-weight: 600; }
 
@@ -120,9 +121,15 @@ nav a.active { color: var(--accent); background: var(--accent-soft-bg); border-l
 .sidebar-foot button:hover { color: var(--text-primary); background: var(--surface-hover); }
 
 .content { min-width: 0; max-width: 62rem; width: 100%; margin: 0 auto; padding: 2.4rem 2.5rem 4rem; }
-.content > header { margin-bottom: 1.6rem; }
+.content > header { display: flex; align-items: center; gap: 1rem; margin-bottom: 1.6rem; }
+.content > header .header-icon {
+  display: grid; place-items: center; width: 46px; height: 46px; border-radius: var(--radius-md);
+  background: var(--accent-soft-bg); color: var(--accent-strong); flex-shrink: 0;
+}
+.content > header .header-icon .icon { width: 22px; height: 22px; }
+.content > header .heading { display: grid; gap: 0.2rem; min-width: 0; }
 .content > header .eyebrow {
-  margin: 0 0 0.3rem; color: var(--text-muted); font-size: 0.72rem;
+  margin: 0; color: var(--text-muted); font-size: 0.72rem;
   font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
 }
 
@@ -131,8 +138,58 @@ nav a.active { color: var(--accent); background: var(--accent-soft-bg); border-l
   display: grid; gap: 0.35rem; padding: 1.05rem 1.15rem; border: 1px solid var(--border);
   border-radius: var(--radius-md); background: var(--color-surface); box-shadow: var(--shadow-sm);
   color: var(--text-muted); font-size: 0.78rem;
+  transition: box-shadow var(--transition), transform var(--transition);
 }
+.card:hover { box-shadow: var(--shadow-md); transform: translateY(-1px); }
 .card strong { font-size: 1.35rem; color: var(--text-primary); font-weight: 700; letter-spacing: -0.01em; }
+
+.icon { width: 1em; height: 1em; display: block; }
+
+.card.card-icon { display: flex; flex-direction: row; align-items: center; gap: 0.8rem; }
+.card-icon-badge {
+  display: grid; place-items: center; width: 34px; height: 34px; border-radius: var(--radius-sm);
+  background: var(--color-inset); color: var(--accent-strong); flex-shrink: 0;
+}
+.card-icon-badge .icon { width: 18px; height: 18px; }
+.card-label {
+  display: block; font-size: 0.72rem; color: var(--text-muted); font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 0.15rem;
+}
+.card.card-icon strong { font-size: 1.1rem; }
+
+.stat-tile {
+  display: flex; align-items: center; gap: 0.9rem; padding: 1.05rem 1.15rem;
+  border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--color-surface);
+  box-shadow: var(--shadow-sm); transition: box-shadow var(--transition), transform var(--transition);
+}
+.stat-tile:hover { box-shadow: var(--shadow-md); transform: translateY(-1px); }
+.stat-tile-icon {
+  display: grid; place-items: center; width: 34px; height: 34px; border-radius: var(--radius-sm);
+  background: var(--color-inset); color: var(--text-muted); flex-shrink: 0;
+}
+.stat-tile-icon .icon { width: 18px; height: 18px; }
+.stat-tile-body { display: grid; gap: 0.15rem; min-width: 0; }
+.stat-tile-label {
+  font-size: 0.72rem; color: var(--text-muted); font-weight: 600;
+  text-transform: uppercase; letter-spacing: 0.04em;
+}
+.stat-tile-value {
+  font-size: 1.15rem; color: var(--text-primary); font-weight: 700; letter-spacing: -0.01em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.gauge-ring { width: 56px; height: 56px; flex-shrink: 0; transform: rotate(-90deg); }
+.gauge-track { fill: none; stroke: var(--border); stroke-width: 3.2; }
+.gauge-value { fill: none; stroke-width: 3.2; stroke-linecap: round; transition: stroke-dasharray 500ms ease; }
+.gauge-value.gauge-accent { stroke: var(--accent-strong); }
+.gauge-value.gauge-warn { stroke: #f59e0b; }
+.gauge-value.gauge-danger { stroke: var(--danger-text); }
+
+.bar-track { width: 100%; min-width: 5rem; height: 6px; border-radius: var(--radius-pill); background: var(--color-inset); overflow: hidden; }
+.bar-value { height: 100%; border-radius: var(--radius-pill); transition: width 500ms ease; }
+.bar-value.bar-accent { background: var(--accent-strong); }
+.bar-value.bar-warn { background: #f59e0b; }
+.bar-value.bar-danger { background: var(--danger-text); }
+td .bar-track { margin-top: 0.4rem; max-width: 11rem; }
 
 table {
   width: 100%; border-collapse: collapse; margin: 0 0 1.25rem;
@@ -180,29 +237,85 @@ form button[type="submit"] {
   transition: filter var(--transition);
 }
 form button[type="submit"]:hover { filter: brightness(1.08); }
+.section-actions { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin: 1.9rem 0 0.75rem; }
+.section-actions h3 { margin: 0; }
+.button-link {
+  display: inline-flex; align-items: center; justify-content: center; min-height: 34px; padding: 0.4rem 0.8rem;
+  border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--color-surface);
+  color: var(--text-secondary); font-size: 0.78rem; font-weight: 600; text-decoration: none; box-shadow: var(--shadow-sm);
+}
+.button-link:hover { color: var(--accent); border-color: var(--accent); }
+.inline-form {
+  grid-template-columns: minmax(9rem, 1fr) minmax(7rem, 0.45fr) auto; align-items: end;
+  max-width: 36rem; padding: 1rem; border: 1px solid var(--border); border-radius: var(--radius-md);
+  background: var(--color-surface); box-shadow: var(--shadow-sm);
+}
+.inline-form button[type="submit"] { min-height: 40px; white-space: nowrap; }
+.row-action-form { display: inline; margin: 0; }
+.row-action-form button[type="submit"] {
+  min-height: 32px; padding: 0.35rem 0.75rem; white-space: nowrap; font-size: 0.78rem;
+}
+.notice { padding: 0.65rem 0.9rem; border-radius: var(--radius-sm); background: var(--accent-soft-bg); color: var(--accent-soft-text); }
+.notice.success { background: var(--success-bg); color: var(--success-text); }
+@media (max-width: 38rem) { .inline-form { grid-template-columns: 1fr; } }
 
 pre { background: var(--color-inset); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 1rem; overflow-x: auto; }
 
 .auth-shell {
-  min-height: 100vh; display: grid; place-items: center; padding: 1.5rem;
-  background: radial-gradient(circle at 20% 15%, var(--accent-soft-bg), transparent 45%), var(--color-canvas);
+  position: relative; isolation: isolate; min-height: 100vh; display: grid; place-items: center;
+  padding: 2rem 1.5rem; overflow: hidden;
+  background:
+    radial-gradient(circle at 16% 12%, var(--accent-soft-bg), transparent 34rem),
+    radial-gradient(circle at 88% 86%, rgb(6 182 212 / 10%), transparent 30rem),
+    var(--color-canvas);
 }
+.auth-shell::before, .auth-shell::after {
+  content: ""; position: absolute; z-index: -1; border: 1px solid var(--border-subtle);
+  border-radius: 50%; opacity: 0.65;
+}
+.auth-shell::before { width: 28rem; height: 28rem; top: -17rem; right: -8rem; }
+.auth-shell::after { width: 22rem; height: 22rem; bottom: -14rem; left: -6rem; }
+.auth-wrap { width: min(26rem, 100%); }
+.auth-brand {
+  display: flex; align-items: center; justify-content: center; gap: 0.65rem;
+  margin-bottom: 1.25rem; color: var(--text-primary);
+}
+.auth-brand .brand-mark { width: 38px; height: 38px; border-radius: 11px; font-size: 1rem; }
+.auth-brand .brand-name { font-size: 1.08rem; }
+.auth-brand-product { color: var(--text-muted); font-size: 0.78rem; font-weight: 500; }
+.auth-brand-product::before { content: "·"; margin-right: 0.65rem; }
 .auth-card {
-  width: min(24rem, 100%); padding: 2.25rem; border: 1px solid var(--border);
-  border-radius: var(--radius-lg); background: var(--color-surface); box-shadow: var(--shadow-lg);
-  text-align: center;
+  width: 100%; padding: 2.25rem; border: 1px solid var(--border);
+  border-radius: var(--radius-lg); background: color-mix(in srgb, var(--color-surface) 96%, transparent);
+  box-shadow: var(--shadow-lg); backdrop-filter: blur(12px); text-align: left;
 }
-.auth-card .brand { justify-content: center; margin-bottom: 0.25rem; }
-.auth-card .brand-mark { width: 50px; height: 50px; border-radius: 13px; font-size: 1.25rem; }
-.auth-card .brand-name { font-size: 1.15rem; }
-.auth-card form { text-align: left; max-width: none; margin: 1.5rem 0 0; }
-.auth-card .error { text-align: left; }
-.auth-card button[type="submit"] { width: 100%; justify-self: stretch; text-align: center; }
+.auth-kicker {
+  margin: 0 0 0.5rem; color: var(--accent); font-size: 0.7rem; font-weight: 750;
+  letter-spacing: 0.09em; text-transform: uppercase;
+}
+.auth-card h1 { font-size: 1.7rem; margin-bottom: 0.55rem; }
+.auth-subtitle { margin: 0; font-size: 0.9rem; line-height: 1.55; }
+.auth-card form { max-width: none; margin: 1.75rem 0 0; gap: 1rem; }
+.auth-card form label { gap: 0.45rem; font-size: 0.78rem; }
+.auth-card input { min-height: 44px; padding: 0.68rem 0.8rem; }
+.auth-card .error { margin: 1.25rem 0 -0.35rem; border: 1px solid color-mix(in srgb, var(--danger-text) 24%, transparent); }
+.auth-card button[type="submit"] {
+  width: 100%; min-height: 44px; justify-self: stretch; margin-top: 0.3rem; text-align: center;
+  background: linear-gradient(135deg, #7c3aed, #5b4de5); box-shadow: 0 8px 18px rgb(109 40 217 / 20%);
+}
+.auth-card button[type="submit"]:active { transform: translateY(1px); }
+.auth-footnote { margin: 1rem 0 0; text-align: center; color: var(--text-muted); font-size: 0.75rem; }
+@media (max-width: 30rem) {
+  .auth-shell { padding: 1.25rem 1rem; align-items: center; }
+  .auth-card { padding: 1.6rem 1.35rem; }
+  .auth-card h1 { font-size: 1.45rem; }
+}
 "#;
 
 struct NavItem {
     href: &'static str,
     label: &'static str,
+    icon: &'static str,
 }
 
 struct NavGroup {
@@ -217,18 +330,22 @@ const NAV: &[NavGroup] = &[
             NavItem {
                 href: "/",
                 label: "Painel",
+                icon: "dashboard",
             },
             NavItem {
                 href: "/software",
                 label: "Software",
+                icon: "software",
             },
             NavItem {
                 href: "/backup",
                 label: "Backup",
+                icon: "backup",
             },
             NavItem {
                 href: "/snapshots",
                 label: "Snapshots",
+                icon: "snapshots",
             },
         ],
     },
@@ -238,34 +355,42 @@ const NAV: &[NavGroup] = &[
             NavItem {
                 href: "/hardware",
                 label: "Hardware e Kernel",
+                icon: "hardware",
             },
             NavItem {
                 href: "/armazenamento",
                 label: "Armazenamento",
+                icon: "storage",
             },
             NavItem {
                 href: "/rede",
                 label: "Rede e Firewall",
+                icon: "network",
             },
             NavItem {
                 href: "/servicos",
                 label: "Serviços",
+                icon: "services",
             },
             NavItem {
                 href: "/usuarios",
                 label: "Usuários",
+                icon: "users",
             },
             NavItem {
                 href: "/logs",
                 label: "Logs",
+                icon: "logs",
             },
             NavItem {
                 href: "/monitor",
                 label: "Monitor",
+                icon: "monitor",
             },
             NavItem {
                 href: "/data-hora",
                 label: "Data e Hora",
+                icon: "datetime",
             },
         ],
     },
@@ -288,7 +413,13 @@ pub fn page(title: &str, active_href: &str, username: &str, body: &str) -> Strin
                     } else {
                         ""
                     };
-                    format!(r#"<a href="{}"{}>{}</a>"#, item.href, class, item.label)
+                    format!(
+                        r#"<a href="{}"{}>{}{}</a>"#,
+                        item.href,
+                        class,
+                        crate::pages::widgets::icon(item.icon),
+                        item.label
+                    )
                 })
                 .collect();
             format!(
@@ -297,6 +428,13 @@ pub fn page(title: &str, active_href: &str, username: &str, body: &str) -> Strin
             )
         })
         .collect();
+
+    let page_icon = NAV
+        .iter()
+        .flat_map(|group| group.items)
+        .find(|item| item.href == active_href)
+        .map(|item| item.icon)
+        .unwrap_or("dashboard");
 
     format!(
         r#"<!doctype html>
@@ -318,19 +456,20 @@ pub fn page(title: &str, active_href: &str, username: &str, body: &str) -> Strin
 </div>
 </aside>
 <div class="content">
-<header><p class="eyebrow">Vega</p><h1>{title}</h1></header>
+<header><div class="header-icon">{}</div><div class="heading"><p class="eyebrow">Vega</p><h1>{title}</h1></div></header>
 {body}
 </div>
 </div>
 </body>
 </html>"#,
-        brand_mark()
+        brand_mark(),
+        crate::pages::widgets::icon(page_icon),
     )
 }
 
 pub fn login_page(error: Option<&str>) -> String {
     let error_html = error
-        .map(|message| format!(r#"<p class="error">{message}</p>"#))
+        .map(|message| format!(r#"<p class="error" role="alert">{message}</p>"#))
         .unwrap_or_default();
 
     format!(
@@ -344,15 +483,23 @@ pub fn login_page(error: Option<&str>) -> String {
 </head>
 <body>
 <div class="auth-shell">
+<main class="auth-wrap">
+<div class="auth-brand">{}<span class="brand-name">Vega</span><span class="auth-brand-product">Administração</span></div>
 <div class="auth-card">
-<div class="brand">{}<span class="brand-name">Vega</span></div>
+<p class="auth-kicker">Área administrativa</p>
+<h1>Boas-vindas</h1>
+<p class="auth-subtitle">Entre com sua conta do sistema para administrar esta máquina com segurança.</p>
 {error_html}
 <form method="post" action="/login">
-<label>Usuário<br><input type="text" name="username" autocomplete="username" required></label>
-<label>Senha<br><input type="password" name="password" autocomplete="current-password" required></label>
-<button type="submit">Entrar</button>
+<label for="username">Usuário</label>
+<input id="username" type="text" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" autofocus required>
+<label for="password">Senha</label>
+<input id="password" type="password" name="password" autocomplete="current-password" required>
+<button type="submit">Entrar no Vega</button>
 </form>
 </div>
+<p class="auth-footnote">Acesso protegido pela autenticação do sistema</p>
+</main>
 </div>
 </body>
 </html>"#,

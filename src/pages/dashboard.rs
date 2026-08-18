@@ -7,6 +7,7 @@ use lyra_vega_dbus::{
 use crate::auth::CurrentUser;
 use crate::state::AppState;
 
+use super::widgets::{gauge_stat, icon_stat};
 use super::{error_body, html_escape, render};
 
 pub async fn handler(
@@ -52,11 +53,11 @@ pub async fn handler(
         Ok(status) => {
             body.push_str(&format!(
                 r#"<div class="cards">
-<div class="card">Distribuição<strong>{}</strong></div>
-<div class="card">Versão do Vega<strong>{}</strong></div>
+{}
+{}
 </div>"#,
-                html_escape(&status.distro),
-                html_escape(&status.version)
+                icon_stat("dashboard", "Distribuição", &html_escape(&status.distro)),
+                icon_stat("software", "Versão do Vega", &html_escape(&status.version)),
             ));
         }
         Err(error) => body.push_str(&error_body("Status do sistema indisponível", error)),
@@ -64,14 +65,23 @@ pub async fn handler(
 
     match services {
         Ok(list) => {
+            let total = list.len();
             let active = list.iter().filter(|service| service.active).count();
+            let percent = if total > 0 {
+                active as f64 / total as f64 * 100.0
+            } else {
+                0.0
+            };
             body.push_str(&format!(
                 r#"<div class="cards">
-<div class="card">Serviços monitorados<strong>{}</strong></div>
-<div class="card">Serviços ativos<strong>{}</strong></div>
+{}
 </div>"#,
-                list.len(),
-                active
+                gauge_stat(
+                    "services",
+                    "Serviços ativos",
+                    &format!("{active} / {total}"),
+                    percent,
+                ),
             ));
         }
         Err(error) => body.push_str(&error_body("Serviços indisponíveis", error)),

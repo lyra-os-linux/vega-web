@@ -7,6 +7,7 @@ use time::format_description::well_known::Rfc3339;
 use crate::auth::CurrentUser;
 use crate::state::AppState;
 
+use super::widgets::icon_stat;
 use super::{error_body, html_escape, render};
 
 pub async fn handler(
@@ -35,11 +36,21 @@ pub async fn handler(
                     })
                     .collect();
                 format!(
-                    r#"<p>Somente leitura nesta versão — criar/reverter snapshots chega numa fase seguinte.</p>
+                    r#"<div class="cards">{} {}</div>
+<p>Somente leitura nesta versão — criar/reverter snapshots chega numa fase seguinte.</p>
 <table>
 <thead><tr><th>ID</th><th>Data</th><th>Origem</th><th>Descrição</th></tr></thead>
 <tbody>{rows}</tbody>
-</table>"#
+</table>"#,
+                    icon_stat("snapshots", "Snapshots", &snapshots.len().to_string()),
+                    icon_stat(
+                        "datetime",
+                        "Mais recente",
+                        &snapshots
+                            .first()
+                            .map(|snapshot| format_timestamp(snapshot.timestamp))
+                            .unwrap_or_else(|| "—".to_string()),
+                    ),
                 )
             }
             Err(error) => error_body("Lista de snapshots indisponível", error),

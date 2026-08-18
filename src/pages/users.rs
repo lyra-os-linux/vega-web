@@ -5,6 +5,7 @@ use lyra_vega_dbus::UsersClient;
 use crate::auth::CurrentUser;
 use crate::state::AppState;
 
+use super::widgets::icon_stat;
 use super::{error_body, html_escape, render};
 
 pub async fn handler(
@@ -14,6 +15,7 @@ pub async fn handler(
     let body = match state.dbus.users().list().await {
         Ok(mut users) => {
             users.sort_by(|a, b| a.username.cmp(&b.username));
+            let admins = users.iter().filter(|account| account.is_admin).count();
             let rows: String = users
                 .iter()
                 .map(|account| {
@@ -28,10 +30,13 @@ pub async fn handler(
                 })
                 .collect();
             format!(
-                r#"<table>
+                r#"<div class="cards">{} {}</div>
+<table>
 <thead><tr><th>Usuário</th><th>Grupos</th><th></th></tr></thead>
 <tbody>{rows}</tbody>
-</table>"#
+</table>"#,
+                icon_stat("users", "Contas", &users.len().to_string()),
+                icon_stat("check", "Administradores", &admins.to_string()),
             )
         }
         Err(error) => error_body("Lista de usuários indisponível", error),

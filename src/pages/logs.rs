@@ -6,6 +6,7 @@ use serde::Deserialize;
 use crate::auth::CurrentUser;
 use crate::state::AppState;
 
+use super::widgets::icon_stat;
 use super::{error_body, html_escape, render};
 
 const MAX_LINES: u32 = 200;
@@ -44,6 +45,14 @@ pub async fn handler(
             .collect(),
         Err(_) => String::new(),
     };
+
+    if let Ok(units) = &units {
+        body.push_str(&format!(
+            r#"<div class="cards">{} {}</div>"#,
+            icon_stat("services", "Unidades", &units.len().to_string()),
+            icon_stat("logs", "Limite por consulta", &MAX_LINES.to_string()),
+        ));
+    }
 
     body.push_str(&format!(
         r#"<form method="get" action="/logs">

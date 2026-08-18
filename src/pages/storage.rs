@@ -5,6 +5,7 @@ use lyra_vega_dbus::StorageClient;
 use crate::auth::CurrentUser;
 use crate::state::AppState;
 
+use super::widgets::bar;
 use super::{error_body, html_escape, render};
 
 pub async fn handler(
@@ -17,13 +18,14 @@ pub async fn handler(
                 .iter()
                 .map(|volume| {
                     format!(
-                        "<tr><td>{}<br><small>{}</small></td><td>{}</td><td>{} / {} ({}%)</td><td>{}</td></tr>",
+                        "<tr><td>{}<br><small>{}</small></td><td>{}</td><td>{} / {} ({}%){}</td><td>{}</td></tr>",
                         html_escape(&volume.name),
                         html_escape(&volume.model),
                         html_escape(&volume.fs_type),
                         html_escape(&volume.used),
                         html_escape(&volume.size),
                         volume.use_percent,
+                        bar(volume.use_percent as f64),
                         html_escape(&volume.mountpoint),
                     )
                 })

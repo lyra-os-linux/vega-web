@@ -5,6 +5,7 @@ use lyra_vega_dbus::MonitorClient;
 use crate::auth::CurrentUser;
 use crate::state::AppState;
 
+use super::widgets::{bar, gauge_stat, icon_stat};
 use super::{error_body, html_escape, render};
 
 pub async fn handler(
@@ -16,29 +17,85 @@ pub async fn handler(
 
     match client.metrics().await {
         Ok(metrics) => {
+            let mem_percent = if metrics.mem_total > 0 {
+                metrics.mem_used as f64 / metrics.mem_total as f64 * 100.0
+            } else {
+                0.0
+            };
+            let swap_percent = if metrics.swap_total > 0 {
+                metrics.swap_used as f64 / metrics.swap_total as f64 * 100.0
+            } else {
+                0.0
+            };
+
+            let gpu_tile = if metrics.gpu_percent >= 0.0 {
+                gauge_stat(
+                    "gpu",
+                    "GPU",
+                    &format!("{:.1}%", metrics.gpu_percent),
+                    metrics.gpu_percent,
+                )
+            } else {
+                icon_stat("gpu", "GPU", "Uso indisponível")
+            };
+            let swap_tile = if metrics.swap_total > 0 {
+                gauge_stat(
+                    "swap",
+                    "Swap",
+                    &format!(
+                        "{} / {}",
+                        format_bytes(metrics.swap_used),
+                        format_bytes(metrics.swap_total)
+                    ),
+                    swap_percent,
+                )
+            } else {
+                icon_stat("swap", "Swap", "Sem swap configurado")
+            };
+
             body.push_str(&format!(
                 r#"<div class="cards">
-<div class="card">CPU<strong>{:.1}%</strong></div>
-<div class="card">GPU<strong>{}</strong></div>
-<div class="card">Memória<strong>{} / {}</strong></div>
-<div class="card">Swap<strong>{} / {}</strong></div>
-<div class="card">Disco (leitura/escrita)<strong>{}/s / {}/s</strong></div>
-<div class="card">Rede (rx/tx)<strong>{}/s / {}/s</strong></div>
+{cpu}{gpu}{mem}{swap}
+{disk_read}{disk_write}{net_rx}{net_tx}
 </div>"#,
-                metrics.cpu_percent,
-                if metrics.gpu_percent >= 0.0 {
-                    format!("{:.1}%", metrics.gpu_percent)
-                } else {
-                    "Uso indisponível".into()
-                },
-                format_bytes(metrics.mem_used),
-                format_bytes(metrics.mem_total),
-                format_bytes(metrics.swap_used),
-                format_bytes(metrics.swap_total),
-                format_bytes(metrics.disk_read_bytes),
-                format_bytes(metrics.disk_write_bytes),
-                format_bytes(metrics.net_rx_bytes),
-                format_bytes(metrics.net_tx_bytes),
+                cpu = gauge_stat(
+                    "cpu",
+                    "CPU",
+                    &format!("{:.1}%", metrics.cpu_percent),
+                    metrics.cpu_percent
+                ),
+                gpu = gpu_tile,
+                mem = gauge_stat(
+                    "memory",
+                    "Memória",
+                    &format!(
+                        "{} / {}",
+                        format_bytes(metrics.mem_used),
+                        format_bytes(metrics.mem_total)
+                    ),
+                    mem_percent,
+                ),
+                swap = swap_tile,
+                disk_read = icon_stat(
+                    "disk",
+                    "Disco (leitura)",
+                    &format!("{}/s", format_bytes(metrics.disk_read_bytes))
+                ),
+                disk_write = icon_stat(
+                    "disk",
+                    "Disco (escrita)",
+                    &format!("{}/s", format_bytes(metrics.disk_write_bytes))
+                ),
+                net_rx = icon_stat(
+                    "download",
+                    "Rede (rx)",
+                    &format!("{}/s", format_bytes(metrics.net_rx_bytes))
+                ),
+                net_tx = icon_stat(
+                    "upload",
+                    "Rede (tx)",
+                    &format!("{}/s", format_bytes(metrics.net_tx_bytes))
+                ),
             ));
         }
         Err(error) => body.push_str(&error_body("Métricas do sistema indisponíveis", error)),
@@ -52,11 +109,12 @@ pub async fn handler(
                 .take(20)
                 .map(|process| {
                     format!(
-                        "<tr><td>{}</td><td>{}</td><td>{}</td><td>{:.1}%</td><td>{}</td></tr>",
+                        "<tr><td>{}</td><td>{}</td><td>{}</td><td>{:.1}%{}</td><td>{}</td></tr>",
                         process.pid,
                         html_escape(&process.name),
                         html_escape(&process.user),
                         process.cpu_percent.get(),
+                        bar(process.cpu_percent.get()),
                         format_bytes(process.memory),
                     )
                 })

@@ -5,6 +5,7 @@ use lyra_vega_dbus::DateTimeClient;
 use crate::auth::CurrentUser;
 use crate::state::AppState;
 
+use super::widgets::icon_stat;
 use super::{error_body, html_escape, render};
 
 pub async fn handler(
@@ -14,16 +15,23 @@ pub async fn handler(
     let body = match state.dbus.datetime().status().await {
         Ok(status) => format!(
             r#"<div class="cards">
-<div class="card">Fuso horário<strong>{}</strong></div>
-<div class="card">NTP<strong><span class="badge {}">{}</span></strong></div>
-<div class="card">Locale<strong>{}</strong></div>
-<div class="card">Teclado<strong>{}</strong></div>
+{}
+{}
+{}
+{}
 </div>"#,
-            html_escape(&status.timezone),
-            if status.ntp { "on" } else { "off" },
-            if status.ntp { "ativo" } else { "inativo" },
-            html_escape(&status.locale),
-            html_escape(&status.keymap),
+            icon_stat("datetime", "Fuso horário", &html_escape(&status.timezone)),
+            icon_stat(
+                if status.ntp { "check" } else { "warning" },
+                "NTP",
+                &format!(
+                    r#"<span class="badge {}">{}</span>"#,
+                    if status.ntp { "on" } else { "off" },
+                    if status.ntp { "ativo" } else { "inativo" },
+                )
+            ),
+            icon_stat("users", "Locale", &html_escape(&status.locale)),
+            icon_stat("hardware", "Teclado", &html_escape(&status.keymap)),
         ),
         Err(error) => error_body("Status de data/hora indisponível", error),
     };

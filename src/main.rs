@@ -69,12 +69,18 @@ async fn main() {
 
     let protected = Router::new()
         .route("/", get(pages::dashboard::handler))
-        .route("/software", get(pages::software::handler))
+        .route(
+            "/software",
+            get(pages::software::handler).post(pages::software::install_native),
+        )
         .route("/backup", get(pages::backup::handler))
         .route("/snapshots", get(pages::snapshots::handler))
         .route("/hardware", get(pages::hardware::handler))
         .route("/armazenamento", get(pages::storage::handler))
-        .route("/rede", get(pages::network::handler))
+        .route(
+            "/rede",
+            get(pages::network::handler).post(pages::network::add_firewall_rule),
+        )
         .route("/servicos", get(pages::services::handler))
         .route("/usuarios", get(pages::users::handler))
         .route("/logs", get(pages::logs::handler))

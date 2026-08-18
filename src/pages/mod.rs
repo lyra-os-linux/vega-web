@@ -10,6 +10,7 @@ pub mod snapshots;
 pub mod software;
 pub mod storage;
 pub mod users;
+pub mod widgets;
 
 use crate::layout;
 
@@ -31,4 +32,6 @@ pub(crate) fn html_escape(input: &str) -> String {
         .replace('&', "&amp;")
         .replace('<', "&lt;")
         .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&#39;")
 }
