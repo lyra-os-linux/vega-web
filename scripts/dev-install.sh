@@ -31,9 +31,15 @@ echo "==> Instalando binário em /usr/lib/vega/vega-web"
 # Workspace Cargo: o binário sempre sai em target/ na raiz do repo, não em
 # vega-web/target/ — mesmo buildando com "cd vega-web && cargo build".
 sudo install -Dm755 "$repo_root/target/release/vega-web" /usr/lib/vega/vega-web
+sudo install -Dm755 "$repo_root/target/release/vega-web-terminal-helper" \
+  /usr/lib/vega/vega-web-terminal-helper
 
-echo "==> Unit systemd"
+echo "==> Units systemd"
 sudo install -Dm644 "$packaging_dir/vega-web.service" /usr/lib/systemd/system/vega-web.service
+sudo install -Dm644 "$packaging_dir/vega-web-terminal.socket" \
+  /usr/lib/systemd/system/vega-web-terminal.socket
+sudo install -Dm644 "$packaging_dir/vega-web-terminal@.service" \
+  /usr/lib/systemd/system/vega-web-terminal@.service
 sudo systemctl daemon-reload
 sudo systemctl enable --now vega-web.service
 

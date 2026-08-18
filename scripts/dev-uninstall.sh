@@ -6,13 +6,17 @@ set -euo pipefail
 
 echo "==> Parando e desabilitando vega-web.service"
 sudo systemctl disable --now vega-web.service 2>/dev/null || true
+sudo systemctl disable --now vega-web-terminal.socket 2>/dev/null || true
 
 echo "==> Removendo unit systemd"
 sudo rm -f /usr/lib/systemd/system/vega-web.service
+sudo rm -f /usr/lib/systemd/system/vega-web-terminal.socket
+sudo rm -f /usr/lib/systemd/system/vega-web-terminal@.service
 sudo systemctl daemon-reload
 
 echo "==> Removendo binário"
 sudo rm -f /usr/lib/vega/vega-web
+sudo rm -f /usr/lib/vega/vega-web-terminal-helper
 # /usr/lib/vega/ é compartilhado com o vegad — não remove o diretório em si.
 
 echo "==> Removendo serviço PAM"

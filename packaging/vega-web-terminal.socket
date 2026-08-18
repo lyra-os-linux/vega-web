@@ -1,0 +1,14 @@
+[Unit]
+Description=Vega web terminal broker socket
+PartOf=vega-web.service
+
+[Socket]
+ListenStream=/run/vega-web-terminal.sock
+SocketUser=root
+SocketGroup=vega-web
+SocketMode=0660
+Accept=yes
+MaxConnections=4
+
+[Install]
+WantedBy=sockets.target

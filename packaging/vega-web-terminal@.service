@@ -1,0 +1,17 @@
+[Unit]
+Description=Vega web terminal session broker
+Documentation=https://lyraos.org/vega
+
+[Service]
+ExecStart=/usr/lib/vega/vega-web-terminal-helper --socket
+StandardInput=socket
+StandardOutput=inherit
+StandardError=journal
+KillMode=control-group
+TimeoutStopSec=5
+UMask=0077
+
+# Esta unidade intencionalmente não herda o sandbox do painel: o processo
+# filho abandona root para o UID autenticado antes de executar o login shell.
+# A unidade é alcançável apenas pelo socket root:vega-web 0660 e o broker
+# ainda valida SO_PEERCRED antes de confiar no nome de usuário recebido.

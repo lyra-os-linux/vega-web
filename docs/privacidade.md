@@ -22,10 +22,10 @@ redes em que você confia nos outros dispositivos.
 - **Antes do login**: só a página de login em si (formulário
   usuário/senha) e a negociação TLS. Nenhum dado do sistema é acessível sem
   autenticação — inclusive as páginas somente-leitura exigem sessão válida.
-- **Depois do login**: dados dos módulos somente-leitura hoje implementados
-  (Painel, Serviços, Snapshots) — os mesmos que `vegad` já expõe sem exigir
-  polkit para `vega-gtk`/`vega-cli`. Nenhuma ação de escrita existe nesta
-  versão.
+- **Depois do login**: dados dos módulos de administração somente-leitura.
+  O terminal exige uma segunda autenticação e só abre para contas do grupo
+  `wheel`; ele é um shell completo e, portanto, tem a mesma capacidade da
+  conta em uma sessão SSH, inclusive `sudo` quando a política local permitir.
 - **Credenciais**: a senha digitada no login é usada uma única vez, na
   chamada a `pam_authenticate`, e não é armazenada em nenhum lugar — nem em
   log, nem em disco, nem na sessão. A sessão guarda só o nome do usuário.
@@ -51,12 +51,16 @@ vale aqui, automaticamente.
   vazamento, mas pode surpreender).
 - **Sem 2FA**: só usuário/senha, como qualquer outro consumidor de PAM sem
   módulos adicionais configurados.
+- O terminal exige novamente a senha, consome a autorização no primeiro
+  WebSocket, limita mensagens a 64 KiB e aceita no máximo quatro sessões
+  simultâneas por padrão. Fechar a conexão encerra o grupo de processos do PTY.
 
 Os limites podem ser ajustados por `VEGA_WEB_LOGIN_ATTEMPTS`,
 `VEGA_WEB_LOGIN_RECOVERY_SECS`, `VEGA_WEB_LOGIN_DELAY_MS`,
 `VEGA_WEB_LOGIN_MAX_DELAY_SECS`, `VEGA_WEB_PAM_CONCURRENCY`,
 `VEGA_WEB_SESSION_IDLE_SECS`, `VEGA_WEB_SESSION_MAX_SECS`,
-`VEGA_WEB_SESSION_GLOBAL_LIMIT` e `VEGA_WEB_SESSION_USER_LIMIT`.
+`VEGA_WEB_SESSION_GLOBAL_LIMIT`, `VEGA_WEB_SESSION_USER_LIMIT` e
+`VEGA_WEB_TERMINAL_LIMIT`.
 
 ## Certificados
 

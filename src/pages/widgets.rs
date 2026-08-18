@@ -45,7 +45,7 @@ pub fn icon(name: &str) -> &'static str {
         "users" => svg!(
             r#"<circle cx="9" cy="8" r="3.2"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><circle cx="17.5" cy="9" r="2.6"/><path d="M15.5 14.2c2.7.4 4.7 2.6 5 5.8"/>"#
         ),
-        "logs" => svg!(
+        "logs" | "terminal" => svg!(
             r#"<rect x="2.5" y="4" width="19" height="16" rx="2"/><path d="M6.5 9.5 10 12l-3.5 2.5"/><path d="M12 15h5.5"/>"#
         ),
         "monitor" => svg!(r#"<path d="M2.5 12h4l2.2-6.5L13 18l2.3-6H21.5"/>"#),

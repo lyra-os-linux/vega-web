@@ -42,10 +42,9 @@ Requires(postun): systemd
 %description
 Interface web HTTPS do Vega, para administração pela rede local. Login via
 PAM (contas do próprio sistema); sem certificado público — ver
-docs/vega-web-privacidade.md para o que isso implica antes de expor além da
-LAN. Nesta versão só lê dados através do vegad (painel, serviços,
-snapshots); ações de escrita chegam numa fase seguinte, com reautenticação
-e sem alterar as regras de polkit já usadas pelo vega-gtk/vega-cli.
+docs/vega-web-privacidade.md antes de expor além da LAN. Inclui um terminal
+web completo, com reautenticação, limitado a administradores do grupo wheel
+e executado com o UID real através de um helper mínimo.
 
 %prep
 %setup -q -n vega-src-%{version}
@@ -65,8 +64,14 @@ cargo build --release --locked --offline
 # vega-web/target/, mesmo com "cd vega-web" no %%build.
 install -Dm755 target/release/vega-web \
   %{buildroot}%{_prefix}/lib/vega/vega-web
+install -Dm755 target/release/vega-web-terminal-helper \
+  %{buildroot}%{_prefix}/lib/vega/vega-web-terminal-helper
 install -Dm644 packaging/vega-web/vega-web.service \
   %{buildroot}%{_prefix}/lib/systemd/system/vega-web.service
+install -Dm644 packaging/vega-web/vega-web-terminal.socket \
+  %{buildroot}%{_prefix}/lib/systemd/system/vega-web-terminal.socket
+install -Dm644 packaging/vega-web/vega-web-terminal@.service \
+  %{buildroot}%{_prefix}/lib/systemd/system/vega-web-terminal@.service
 install -Dm644 packaging/vega-web/sysusers.d/vega-web.conf \
   %{buildroot}%{_sysusersdir}/vega-web.conf
 install -Dm644 packaging/vega-web/tmpfiles.d/vega-web.conf \
@@ -77,7 +82,10 @@ install -Dm644 packaging/vega-web/pam.d/vega-web \
 %files
 %dir %{_prefix}/lib/vega
 %{_prefix}/lib/vega/vega-web
+%{_prefix}/lib/vega/vega-web-terminal-helper
 %{_prefix}/lib/systemd/system/vega-web.service
+%{_prefix}/lib/systemd/system/vega-web-terminal.socket
+%{_prefix}/lib/systemd/system/vega-web-terminal@.service
 %{_sysusersdir}/vega-web.conf
 %{_prefix}/lib/tmpfiles.d/vega-web.conf
 %config(noreplace) %{_sysconfdir}/pam.d/vega-web

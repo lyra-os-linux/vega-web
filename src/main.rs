@@ -15,7 +15,7 @@ use axum::{Router, middleware};
 use axum_extra::extract::cookie::Key;
 
 use auth::PamAuthenticator;
-use state::{AppState, LoginLimiter, LoginPolicy, SessionPolicy, SessionStore};
+use state::{AppState, LoginLimiter, LoginPolicy, SessionPolicy, SessionStore, TerminalGrants};
 use tokio::sync::Semaphore;
 
 #[tokio::main]
@@ -57,6 +57,8 @@ async fn main() {
             max_delay: Duration::from_secs(env_u64("VEGA_WEB_LOGIN_MAX_DELAY_SECS", 30)),
         }),
         pam_slots: Arc::new(Semaphore::new(env_usize("VEGA_WEB_PAM_CONCURRENCY", 4))),
+        terminal_grants: TerminalGrants::default(),
+        terminal_slots: Arc::new(Semaphore::new(env_usize("VEGA_WEB_TERMINAL_LIMIT", 4))),
     };
 
     let tls_config = tls::ensure_self_signed(
@@ -86,6 +88,13 @@ async fn main() {
         .route("/logs", get(pages::logs::handler))
         .route("/monitor", get(pages::monitor::handler))
         .route("/data-hora", get(pages::datetime::handler))
+        .route(
+            "/terminal",
+            get(pages::terminal::handler).post(pages::terminal::reauthenticate),
+        )
+        .route("/terminal/ws", get(pages::terminal::websocket))
+        .route("/assets/xterm.js", get(pages::terminal::xterm_js))
+        .route("/assets/xterm.css", get(pages::terminal::xterm_css))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             auth::require_session,

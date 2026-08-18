@@ -1,7 +1,8 @@
 [Unit]
 Description=Vega web control panel (HTTPS, LAN)
 Documentation=https://lyraos.org/vega
-After=network.target vegad.service
+Requires=vega-web-terminal.socket
+After=network.target vegad.service vega-web-terminal.socket
 
 [Service]
 ExecStart=/usr/lib/vega/vega-web
@@ -11,6 +12,8 @@ Environment=VEGA_WEB_BIND=0.0.0.0:9090
 Environment=VEGA_WEB_TLS_DIR=/etc/vega/web/tls
 Environment=VEGA_WEB_TLS_NAMES=%H,localhost,127.0.0.1,::1
 Environment=VEGA_WEB_PAM_SERVICE=vega-web
+Environment=VEGA_WEB_TERMINAL_SOCKET=/run/vega-web-terminal.sock
+Environment=VEGA_WEB_TERMINAL_LIMIT=4
 Restart=on-failure
 RestartSec=5
 

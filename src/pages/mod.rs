@@ -9,6 +9,7 @@ pub mod services;
 pub mod snapshots;
 pub mod software;
 pub mod storage;
+pub mod terminal;
 pub mod users;
 pub mod widgets;
 

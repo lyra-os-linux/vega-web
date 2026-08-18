@@ -392,6 +392,11 @@ const NAV: &[NavGroup] = &[
                 label: "Data e Hora",
                 icon: "datetime",
             },
+            NavItem {
+                href: "/terminal",
+                label: "Terminal",
+                icon: "terminal",
+            },
         ],
     },
 ];

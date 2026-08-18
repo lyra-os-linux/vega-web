@@ -11,6 +11,27 @@ use crate::auth::Authenticator;
 
 pub const SESSION_COOKIE: &str = "vega_web_session";
 
+#[derive(Clone, Default)]
+pub struct TerminalGrants(Arc<Mutex<HashMap<String, Instant>>>);
+
+impl TerminalGrants {
+    pub fn grant(&self, session: String, until: Instant) {
+        self.0.lock().unwrap().insert(session, until);
+    }
+
+    pub fn valid(&self, session: &str, now: Instant) -> bool {
+        let mut grants = self.0.lock().unwrap();
+        grants.retain(|_, until| *until > now);
+        grants.get(session).is_some_and(|until| *until > now)
+    }
+
+    pub fn consume(&self, session: &str, now: Instant) -> bool {
+        let mut grants = self.0.lock().unwrap();
+        grants.retain(|_, until| *until > now);
+        grants.remove(session).is_some_and(|until| until > now)
+    }
+}
+
 #[derive(Clone, Copy)]
 pub struct SessionPolicy {
     pub idle_timeout: Duration,
@@ -223,6 +244,8 @@ pub struct AppState {
     pub authenticator: Arc<dyn Authenticator>,
     pub login_limiter: LoginLimiter,
     pub pam_slots: Arc<Semaphore>,
+    pub terminal_grants: TerminalGrants,
+    pub terminal_slots: Arc<Semaphore>,
 }
 
 impl FromRef<AppState> for Key {

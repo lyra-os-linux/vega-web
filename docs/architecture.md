@@ -1,7 +1,8 @@
 # Arquitetura do vega-web
 
-Status: Fase 1 (painel somente-leitura) implementada. Fase 2 (ações
-privilegiadas) ainda não iniciada — ver seção final.
+Status: painel de administração e terminal web implementados. As páginas de
+configuração continuam somente-leitura; o terminal é uma fronteira separada,
+restrita a administradores.
 
 ## Objetivo e limites
 
@@ -90,7 +91,34 @@ ele só lê D-Bus público e checa senha via PAM, nada mais.
   aviso de certificado não confiável no navegador é esperado — ver
   `docs/vega-web-privacidade.md`.
 
-## Fase 2 — ações privilegiadas (ainda não implementada)
+## Terminal web administrativo
+
+O terminal usa xterm.js incorporado ao pacote (sem CDN), WebSocket e um PTY.
+Antes de cada conexão o usuário precisa confirmar novamente sua senha; a
+autorização vale por 60 segundos e é consumida pela primeira conexão. Há no
+máximo quatro terminais simultâneos por padrão
+(`VEGA_WEB_TERMINAL_LIMIT`). O upgrade WebSocket exige que `Origin` seja o
+mesmo host HTTPS, e mensagens de entrada são limitadas a 64 KiB.
+
+`vega-web-terminal.socket` é `root:vega-web`, modo `0660`, e ativa uma instância
+root de `vega-web-terminal@.service` para cada conexão. O broker:
+
+1. valida com `SO_PEERCRED` que o peer é realmente o usuário `vega-web`;
+2. resolve a conta local sem aceitar UID 0 e exige participação em `wheel`;
+3. cria o PTY e, no filho, aplica `initgroups`, `setgid` e `setuid` antes de
+   executar exclusivamente o shell cadastrado em `/etc/passwd`;
+4. limpa o ambiente, define um `PATH` fixo e inicia o shell como login shell;
+5. no broker pai, remove imediatamente root e grupos suplementares, ficando
+   apenas como `vega-web` para transportar bytes e redimensionamentos;
+6. encerra o grupo de processos da sessão quando a conexão é fechada.
+
+O painel segue com `NoNewPrivileges=true`, `ProtectHome=true` e seu sandbox
+original. Somente a unidade socket-activated da sessão fica fora desse
+namespace; seu filho remove root para o UID autenticado antes do `exec`.
+Isso permite que o shell tenha semântica equivalente a uma sessão SSH sem
+afrouxar o processo HTTPS exposto à rede.
+
+## Fase 2 — demais ações privilegiadas (ainda não implementada)
 
 Para preservar as regras de polkit por usuário (`packaging/vegad/org.lyraos.vega.policy`,
 todas `auth_admin` interativo) sem alterar `vegad`, a Fase 2 precisa de:
