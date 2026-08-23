@@ -9,11 +9,9 @@
 # diretório faz substituição textual simples na linha "Version:" e não
 # entende macro, então precisa achar um valor literal aqui pra reescrever.
 #
-# NOTA: este pacote ainda não existe em nenhum projeto OBS — precisa ser
-# criado manualmente e ganhar seu próprio serviço cargo_vendor apontando
-# para este repositório (agora que vega-web não é mais um workspace member
-# do monorepo vega, o vendor deve cobrir só as dependências deste
-# Cargo.toml, incluindo a dependência git em lyra-vega-dbus).
+# vendor.tar.gz é gerado manualmente (cargo vendor) e cobre só as
+# dependências deste Cargo.toml, incluindo a dependência git em
+# lyra-vega-dbus — não é mais o vendor do workspace do monorepo vega.
 Name:           vega-web
 Version:        0
 Release:        1%{?dist}

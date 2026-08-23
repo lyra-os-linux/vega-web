@@ -1,10 +1,10 @@
 <services>
   <!-- Fonte de verdade pro build no OBS. Adaptado do _service compartilhado
        que o monorepo vega usava antes da quebra em repositórios próprios —
-       agora aponta direto pro repo do vega-web. Este pacote ainda não
-       existe em nenhum projeto OBS (ver NOTA em packaging/vega-web.obs.spec)
-       — precisa ser criado manualmente, junto com o serviço cargo_vendor
-       que gera o vendor.tar.gz consumido pelo spec. -->
+       agora aponta direto pro repo do vega-web. vendor.tar.gz (Source1 no
+       .spec) é mantido manual, como nos outros pacotes Rust do projeto —
+       o serviço automático cargo_vendor não é confiável na VM de build do
+       OBS (sem rede). -->
   <service name="tar_scm">
     <param name="scm">git</param>
     <param name="url">https://github.com/lyra-os-linux/vega-web.git</param>
