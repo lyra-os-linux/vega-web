@@ -7,12 +7,11 @@
 set -euo pipefail
 
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
-crate_dir="$repo_root/vega-web"
-packaging_dir="$repo_root/packaging/vega-web"
+packaging_dir="$repo_root/packaging"
 
-echo "==> Buildando vega-web a partir de $crate_dir"
+echo "==> Buildando vega-web a partir de $repo_root"
 (
-  cd "$crate_dir"
+  cd "$repo_root"
   cargo build --release --locked
 )
 
@@ -28,8 +27,6 @@ echo "==> Serviço PAM (auth via contas do sistema)"
 sudo install -Dm644 "$packaging_dir/pam.d/vega-web" /etc/pam.d/vega-web
 
 echo "==> Instalando binário em /usr/lib/vega/vega-web"
-# Workspace Cargo: o binário sempre sai em target/ na raiz do repo, não em
-# vega-web/target/ — mesmo buildando com "cd vega-web && cargo build".
 sudo install -Dm755 "$repo_root/target/release/vega-web" /usr/lib/vega/vega-web
 sudo install -Dm755 "$repo_root/target/release/vega-web-terminal-helper" \
   /usr/lib/vega/vega-web-terminal-helper

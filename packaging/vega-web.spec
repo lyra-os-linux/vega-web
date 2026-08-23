@@ -1,6 +1,7 @@
-# Empacotamento para Linux. Ainda não publicado
-# em nenhum repositório oficial (OBS ou similar) — ver packaging/opensuse/
-# no topo do repositório para o script de instalação manual equivalente.
+# Empacotamento manual para Linux, a partir de um tarball "achatado" do
+# próprio repositório (sem diretório de nível superior) — ver
+# packaging/vega-web.obs.spec para a variante consumida pelo OBS via
+# tar_scm.
 #
 # %%{version} é passado pela release/CI via `rpmbuild --define "version X.Y.Z"`
 # (a tag `vX.Y.Z` sem o "v"). Buildar sem essa define usa o default abaixo.
@@ -11,8 +12,8 @@ Version:        %{version}
 Release:        1%{?dist}
 Summary:        Painel web HTTPS (somente LAN) do Vega, centro de controle para Linux
 License:        GPL-3.0-only
-URL:            https://github.com/britors/Vega
-Source0:        vega-src.tar.gz
+URL:            https://github.com/lyra-os-linux/vega-web
+Source0:        vega-web-src.tar.gz
 
 BuildRequires:  cargo
 BuildRequires:  rust
@@ -30,35 +31,32 @@ Requires(postun): systemd
 %description
 Interface web HTTPS do Vega, para administração pela rede local. Login via
 PAM (contas do próprio sistema); sem certificado público — ver
-docs/vega-web-privacidade.md antes de expor além da LAN. Inclui um terminal
+docs/privacidade.md antes de expor além da LAN. Inclui um terminal
 web completo, com reautenticação, limitado a administradores do grupo wheel
 e executado com o UID real através de um helper mínimo.
 
 %prep
-%setup -q -c -n vega-src
+%setup -q -c -n vega-web-src
 
 %build
-cd vega-web
 cargo build --release --locked
 
 %install
-# Workspace Cargo: o binário sai em target/ na raiz do checkout, não em
-# vega-web/target/, mesmo com "cd vega-web" no %%build.
 install -Dm755 target/release/vega-web \
   %{buildroot}%{_prefix}/lib/vega/vega-web
 install -Dm755 target/release/vega-web-terminal-helper \
   %{buildroot}%{_prefix}/lib/vega/vega-web-terminal-helper
-install -Dm644 packaging/vega-web/vega-web.service \
+install -Dm644 packaging/vega-web.service \
   %{buildroot}%{_prefix}/lib/systemd/system/vega-web.service
-install -Dm644 packaging/vega-web/vega-web-terminal.socket \
+install -Dm644 packaging/vega-web-terminal.socket \
   %{buildroot}%{_prefix}/lib/systemd/system/vega-web-terminal.socket
-install -Dm644 packaging/vega-web/vega-web-terminal@.service \
+install -Dm644 packaging/vega-web-terminal@.service \
   %{buildroot}%{_prefix}/lib/systemd/system/vega-web-terminal@.service
-install -Dm644 packaging/vega-web/sysusers.d/vega-web.conf \
+install -Dm644 packaging/sysusers.d/vega-web.conf \
   %{buildroot}%{_sysusersdir}/vega-web.conf
-install -Dm644 packaging/vega-web/tmpfiles.d/vega-web.conf \
+install -Dm644 packaging/tmpfiles.d/vega-web.conf \
   %{buildroot}%{_prefix}/lib/tmpfiles.d/vega-web.conf
-install -Dm644 packaging/vega-web/pam.d/vega-web \
+install -Dm644 packaging/pam.d/vega-web \
   %{buildroot}%{_sysconfdir}/pam.d/vega-web
 
 %files
@@ -75,7 +73,7 @@ install -Dm644 packaging/vega-web/pam.d/vega-web \
 # Usuário de sistema dedicado. O processo de rede permanece nesse UID; cada
 # broker de terminal root nasce isoladamente por ativação de socket.
 %pre
-%sysusers_create_package vega-web packaging/vega-web/sysusers.d/vega-web.conf
+%sysusers_create_package vega-web packaging/sysusers.d/vega-web.conf
 
 %post
 systemd-tmpfiles --create %{_prefix}/lib/tmpfiles.d/vega-web.conf 2>/dev/null || true

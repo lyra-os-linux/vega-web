@@ -1,0 +1,21 @@
+<services>
+  <!-- Fonte de verdade pro build no OBS. Adaptado do _service compartilhado
+       que o monorepo vega usava antes da quebra em repositórios próprios —
+       agora aponta direto pro repo do vega-web. Este pacote ainda não
+       existe em nenhum projeto OBS (ver NOTA em packaging/vega-web.obs.spec)
+       — precisa ser criado manualmente, junto com o serviço cargo_vendor
+       que gera o vendor.tar.gz consumido pelo spec. -->
+  <service name="tar_scm">
+    <param name="scm">git</param>
+    <param name="url">https://github.com/lyra-os-linux/vega-web.git</param>
+    <param name="revision">main</param>
+    <param name="match-tag">v*</param>
+    <param name="versionformat">@PARENT_TAG@</param>
+    <param name="versionrewrite-pattern">v(.*)</param>
+    <param name="versionrewrite-replacement">\1</param>
+    <param name="exclude">.git</param>
+    <param name="exclude">target</param>
+    <param name="filename">vega-web-src</param>
+  </service>
+  <service name="set_version" />
+</services>

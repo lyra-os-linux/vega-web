@@ -1,25 +1,26 @@
-# Empacotamento para o openSUSE Build Service (home:rodrigosbrito:vega).
-# Cópia de packaging/opensuse/vega-web.spec adaptada só no Source0/%setup
-# pra bater com o tarball que o _service (tar_scm) deste mesmo diretório
-# gera — nome com sufixo de versão e diretório interno próprio, ao invés
-# do tar "achatado" usado pelo empacotamento local. Resto do spec é
-# idêntico ao de packaging/opensuse/.
+# Empacotamento para o openSUSE Build Service. Variante de
+# packaging/vega-web.spec adaptada só no Source0/%setup pra bater com o
+# tarball que packaging/_service (tar_scm) gera — nome com sufixo de versão
+# e diretório interno próprio, ao invés do tar "achatado" usado pelo
+# empacotamento local. Resto do spec é idêntico ao de
+# packaging/vega-web.spec.
 #
 # Version literal (não %%{version}/%%define) — o serviço set_version deste
 # diretório faz substituição textual simples na linha "Version:" e não
 # entende macro, então precisa achar um valor literal aqui pra reescrever.
 #
-# NOTA: este pacote ainda não existe no projeto OBS home:rodrigosbrito:vega
-# — precisa ser criado lá manualmente (como vega-gtk/vegad/vega-cli já são)
-# e ganhar seu próprio serviço cargo_vendor apontando para o workspace,
-# igual ao que já existe para o pacote vega-gtk.
+# NOTA: este pacote ainda não existe em nenhum projeto OBS — precisa ser
+# criado manualmente e ganhar seu próprio serviço cargo_vendor apontando
+# para este repositório (agora que vega-web não é mais um workspace member
+# do monorepo vega, o vendor deve cobrir só as dependências deste
+# Cargo.toml, incluindo a dependência git em lyra-vega-dbus).
 Name:           vega-web
 Version:        0
 Release:        1%{?dist}
 Summary:        Painel web HTTPS (somente LAN) do Vega, centro de controle para Linux
 License:        GPL-3.0-only
-URL:            https://github.com/britors/Vega
-Source0:        vega-src-%{version}.tar
+URL:            https://github.com/lyra-os-linux/vega-web
+Source0:        vega-web-src-%{version}.tar
 # vendor.tar.gz gerado pelo _service cargo_vendor (rede exigida, que a VM
 # de build do OBS não tem — sem isso, "cargo build" trava tentando baixar
 # crates de index.crates.io e falha). Traz .cargo/config.toml + Cargo.lock
@@ -42,13 +43,13 @@ Requires(postun): systemd
 %description
 Interface web HTTPS do Vega, para administração pela rede local. Login via
 PAM (contas do próprio sistema); sem certificado público — ver
-docs/vega-web-privacidade.md antes de expor além da LAN. Inclui um terminal
+docs/privacidade.md antes de expor além da LAN. Inclui um terminal
 web completo, com reautenticação, limitado a administradores do grupo wheel
 e executado com o UID real através de um helper mínimo.
 
 %prep
-%setup -q -n vega-src-%{version}
-# .cargo/config.toml + vendor/ vão na raiz do workspace, junto do
+%setup -q -n vega-web-src-%{version}
+# .cargo/config.toml + vendor/ vão na raiz do repositório, junto do
 # Cargo.toml — é onde o cargo procura por padrão.
 # O vendor.tar.gz pode ter sido gerado numa release anterior. Preserve o
 # Cargo.lock da tag atual; o tar fornece apenas a configuração offline e os
@@ -56,27 +57,24 @@ e executado com o UID real através de um helper mínimo.
 tar --anchored --exclude=Cargo.lock -xzf %{SOURCE1}
 
 %build
-cd vega-web
 cargo build --release --locked --offline
 
 %install
-# Workspace Cargo: o binário sai em target/ na raiz do checkout, não em
-# vega-web/target/, mesmo com "cd vega-web" no %%build.
 install -Dm755 target/release/vega-web \
   %{buildroot}%{_prefix}/lib/vega/vega-web
 install -Dm755 target/release/vega-web-terminal-helper \
   %{buildroot}%{_prefix}/lib/vega/vega-web-terminal-helper
-install -Dm644 packaging/vega-web/vega-web.service \
+install -Dm644 packaging/vega-web.service \
   %{buildroot}%{_prefix}/lib/systemd/system/vega-web.service
-install -Dm644 packaging/vega-web/vega-web-terminal.socket \
+install -Dm644 packaging/vega-web-terminal.socket \
   %{buildroot}%{_prefix}/lib/systemd/system/vega-web-terminal.socket
-install -Dm644 packaging/vega-web/vega-web-terminal@.service \
+install -Dm644 packaging/vega-web-terminal@.service \
   %{buildroot}%{_prefix}/lib/systemd/system/vega-web-terminal@.service
-install -Dm644 packaging/vega-web/sysusers.d/vega-web.conf \
+install -Dm644 packaging/sysusers.d/vega-web.conf \
   %{buildroot}%{_sysusersdir}/vega-web.conf
-install -Dm644 packaging/vega-web/tmpfiles.d/vega-web.conf \
+install -Dm644 packaging/tmpfiles.d/vega-web.conf \
   %{buildroot}%{_prefix}/lib/tmpfiles.d/vega-web.conf
-install -Dm644 packaging/vega-web/pam.d/vega-web \
+install -Dm644 packaging/pam.d/vega-web \
   %{buildroot}%{_sysconfdir}/pam.d/vega-web
 
 %files
@@ -91,7 +89,7 @@ install -Dm644 packaging/vega-web/pam.d/vega-web \
 %config(noreplace) %{_sysconfdir}/pam.d/vega-web
 
 %pre
-%sysusers_create_package vega-web packaging/vega-web/sysusers.d/vega-web.conf
+%sysusers_create_package vega-web packaging/sysusers.d/vega-web.conf
 
 %post
 systemd-tmpfiles --create %{_prefix}/lib/tmpfiles.d/vega-web.conf 2>/dev/null || true
