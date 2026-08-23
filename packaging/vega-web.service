@@ -1,6 +1,6 @@
 [Unit]
 Description=Vega web control panel (HTTPS, LAN)
-Documentation=https://lyraos.org/vega
+Documentation=https://lyraos.com.br/vega
 Requires=vega-web-terminal.socket
 After=network.target vegad.service vega-web-terminal.socket
 

@@ -1,6 +1,6 @@
 [Unit]
 Description=Vega web terminal session broker
-Documentation=https://lyraos.org/vega
+Documentation=https://lyraos.com.br/vega
 
 [Service]
 ExecStart=/usr/lib/vega/vega-web-terminal-helper --socket
