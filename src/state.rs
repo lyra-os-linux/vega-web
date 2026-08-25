@@ -308,6 +308,22 @@ mod tests {
     }
 
     #[test]
+    fn terminal_grant_is_session_bound_expiring_and_single_use() {
+        let grants = TerminalGrants::default();
+        let now = Instant::now();
+        grants.grant("session-a".into(), now + Duration::from_secs(60));
+
+        assert!(grants.valid("session-a", now));
+        assert!(!grants.valid("session-b", now));
+        assert!(grants.consume("session-a", now));
+        assert!(!grants.consume("session-a", now));
+
+        grants.grant("expired".into(), now);
+        assert!(!grants.valid("expired", now));
+        assert!(!grants.consume("expired", now));
+    }
+
+    #[test]
     fn limiter_isolates_origins_and_recovers() {
         let now = Instant::now();
         let limiter = LoginLimiter::new(LoginPolicy {
