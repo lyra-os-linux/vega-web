@@ -14,6 +14,7 @@ Summary:        Painel web HTTPS (somente LAN) do Vega, centro de controle para 
 License:        GPL-3.0-only
 URL:            https://github.com/lyra-os-linux/vega-web
 Source0:        vega-web-src.tar.gz
+Source1:        vega-web.sysusers
 
 BuildRequires:  cargo
 BuildRequires:  rust
@@ -52,7 +53,7 @@ install -Dm644 packaging/vega-web-terminal.socket \
   %{buildroot}%{_prefix}/lib/systemd/system/vega-web-terminal.socket
 install -Dm644 packaging/vega-web-terminal@.service \
   %{buildroot}%{_prefix}/lib/systemd/system/vega-web-terminal@.service
-install -Dm644 packaging/sysusers.d/vega-web.conf \
+install -Dm644 %{SOURCE1} \
   %{buildroot}%{_sysusersdir}/vega-web.conf
 install -Dm644 packaging/tmpfiles.d/vega-web.conf \
   %{buildroot}%{_prefix}/lib/tmpfiles.d/vega-web.conf
@@ -73,7 +74,7 @@ install -Dm644 packaging/pam.d/vega-web \
 # Usuário de sistema dedicado. O processo de rede permanece nesse UID; cada
 # broker de terminal root nasce isoladamente por ativação de socket.
 %pre
-%sysusers_create_package vega-web packaging/sysusers.d/vega-web.conf
+%sysusers_create_package vega-web %{SOURCE1}
 
 %post
 systemd-tmpfiles --create %{_prefix}/lib/tmpfiles.d/vega-web.conf 2>/dev/null || true

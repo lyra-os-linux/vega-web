@@ -1,0 +1,6 @@
+#Type Name       ID   GECOS                  Home directory
+u      vega-web   -    "Vega web daemon"      /var/lib/vega-web
+# unix_chkpwd só deixa checar a senha de outro usuário (não a própria) se
+# quem chama for root ou membro do grupo shadow — vega-web precisa disso
+# pra autenticar qualquer conta que fizer login no painel.
+m      vega-web   shadow

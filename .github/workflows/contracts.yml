@@ -36,5 +36,6 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Parse RPM specs with openSUSE macros
         run: |
+          cmp packaging/vega-web.sysusers packaging/sysusers.d/vega-web.conf
           rpmspec -P packaging/vega-web.spec >/dev/null
           rpmspec -P packaging/vega-web.obs.spec >/dev/null

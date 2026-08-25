@@ -24,6 +24,7 @@ Source0:        vega-web-src-%{version}.tar
 # crates de index.crates.io e falha). Traz .cargo/config.toml + Cargo.lock
 # + vendor/ prontos pra extrair na raiz do workspace.
 Source1:        vendor.tar.gz
+Source2:        vega-web.sysusers
 
 BuildRequires:  cargo
 BuildRequires:  rust
@@ -68,7 +69,7 @@ install -Dm644 packaging/vega-web-terminal.socket \
   %{buildroot}%{_prefix}/lib/systemd/system/vega-web-terminal.socket
 install -Dm644 packaging/vega-web-terminal@.service \
   %{buildroot}%{_prefix}/lib/systemd/system/vega-web-terminal@.service
-install -Dm644 packaging/sysusers.d/vega-web.conf \
+install -Dm644 %{SOURCE2} \
   %{buildroot}%{_sysusersdir}/vega-web.conf
 install -Dm644 packaging/tmpfiles.d/vega-web.conf \
   %{buildroot}%{_prefix}/lib/tmpfiles.d/vega-web.conf
@@ -87,7 +88,7 @@ install -Dm644 packaging/pam.d/vega-web \
 %config(noreplace) %{_sysconfdir}/pam.d/vega-web
 
 %pre
-%sysusers_create_package vega-web packaging/sysusers.d/vega-web.conf
+%sysusers_create_package vega-web %{SOURCE2}
 
 %post
 systemd-tmpfiles --create %{_prefix}/lib/tmpfiles.d/vega-web.conf 2>/dev/null || true
