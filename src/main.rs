@@ -59,6 +59,7 @@ async fn main() {
         pam_slots: Arc::new(Semaphore::new(env_usize("VEGA_WEB_PAM_CONCURRENCY", 4))),
         terminal_grants: TerminalGrants::default(),
         terminal_slots: Arc::new(Semaphore::new(env_usize("VEGA_WEB_TERMINAL_LIMIT", 4))),
+        terminal_socket: env_or("VEGA_WEB_TERMINAL_SOCKET", "/run/vega-web/terminal.sock"),
     };
 
     let tls_config = tls::ensure_self_signed(

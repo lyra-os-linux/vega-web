@@ -13,5 +13,8 @@ UMask=0077
 
 # Esta unidade intencionalmente não herda o sandbox do painel: o processo
 # filho abandona root para o UID autenticado antes de executar o login shell.
+# O encaminhador de bytes roda como vega-web; o supervisor root somente
+# observa desconexão, término dos filhos e revogação de wheel. Ao sair,
+# KillMode encerra também descendentes que criaram outra sessão/process group.
 # A unidade é alcançável apenas pelo socket root:vega-web 0660 e o broker
 # ainda valida SO_PEERCRED antes de confiar no nome de usuário recebido.

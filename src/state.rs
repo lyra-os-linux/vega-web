@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 use axum::extract::FromRef;
 use axum_extra::extract::cookie::Key;
 use lyra_vega_dbus::VegaDbus;
-use tokio::sync::Semaphore;
+use tokio::sync::{Semaphore, watch};
 
 use crate::auth::Authenticator;
 
@@ -55,6 +55,7 @@ pub struct Session {
     pub username: String,
     created_at: Instant,
     last_seen: Instant,
+    expires: watch::Sender<Instant>,
 }
 
 impl Session {
@@ -63,12 +64,43 @@ impl Session {
             username,
             created_at: now,
             last_seen: now,
+            expires: watch::channel(now).0,
         }
     }
 
     fn expired(&self, now: Instant, policy: SessionPolicy) -> bool {
         now.duration_since(self.created_at) >= policy.absolute_timeout
             || now.duration_since(self.last_seen) >= policy.idle_timeout
+    }
+
+    fn publish_expiry(&self, policy: SessionPolicy) {
+        self.expires.send_replace(
+            (self.created_at + policy.absolute_timeout).min(self.last_seen + policy.idle_timeout),
+        );
+    }
+}
+
+/// A live terminal observes the same deadline as HTTP requests. Only the
+/// stored session owns the sender: logout, eviction and replacement revoke
+/// every subscriber, including one waiting for a slow socket write.
+pub struct SessionLease {
+    pub username: String,
+    expires: watch::Receiver<Instant>,
+}
+
+impl SessionLease {
+    pub async fn revoked(&mut self) {
+        loop {
+            let deadline = *self.expires.borrow_and_update();
+            if deadline <= Instant::now() {
+                return;
+            }
+            tokio::select! {
+                biased;
+                changed = self.expires.changed() => if changed.is_err() { return; },
+                _ = tokio::time::sleep_until(tokio::time::Instant::from_std(deadline)) => {}
+            }
+        }
     }
 }
 
@@ -104,15 +136,28 @@ impl SessionStore {
         while store.values.len() >= store.policy.global_limit {
             remove_oldest(&mut store, None);
         }
+        session.publish_expiry(store.policy);
         store.values.insert(token, session);
     }
 
     pub fn username_for(&self, token: &str, now: Instant) -> Option<String> {
         let mut store = self.0.lock().unwrap();
         remove_expired(&mut store, now);
+        let policy = store.policy;
         let session = store.values.get_mut(token)?;
         session.last_seen = now;
+        session.publish_expiry(policy);
         Some(session.username.clone())
+    }
+
+    pub fn lease(&self, token: &str, now: Instant) -> Option<SessionLease> {
+        let mut store = self.0.lock().unwrap();
+        remove_expired(&mut store, now);
+        let session = store.values.get(token)?;
+        Some(SessionLease {
+            username: session.username.clone(),
+            expires: session.expires.subscribe(),
+        })
     }
 
     pub fn remove(&self, token: &str) {
@@ -246,6 +291,7 @@ pub struct AppState {
     pub pam_slots: Arc<Semaphore>,
     pub terminal_grants: TerminalGrants,
     pub terminal_slots: Arc<Semaphore>,
+    pub terminal_socket: String,
 }
 
 impl FromRef<AppState> for Key {
@@ -257,6 +303,50 @@ impl FromRef<AppState> for Key {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn session_removal_eviction_and_replacement_revoke_all_terminals() {
+        for action in ["logout", "per-user", "global", "replacement"] {
+            let now = Instant::now();
+            let store = SessionStore::new(SessionPolicy {
+                global_limit: 1,
+                per_user_limit: 1,
+                ..SessionPolicy::default()
+            });
+            store.insert("token".into(), Session::new("alice".into(), now));
+            let mut first = store.lease("token", now).unwrap();
+            let mut second = store.lease("token", now).unwrap();
+            match action {
+                "logout" => store.remove("token"),
+                "per-user" => store.insert("new".into(), Session::new("alice".into(), now)),
+                "global" => store.insert("new".into(), Session::new("bob".into(), now)),
+                _ => store.insert("token".into(), Session::new("bob".into(), now)),
+            }
+            tokio::time::timeout(Duration::from_secs(1), async {
+                first.revoked().await;
+                second.revoked().await;
+            })
+            .await
+            .expect(action);
+        }
+    }
+
+    #[test]
+    fn terminal_deadline_tracks_http_activity_but_never_exceeds_absolute_expiry() {
+        let now = Instant::now();
+        let store = SessionStore::new(SessionPolicy {
+            idle_timeout: Duration::from_secs(5),
+            absolute_timeout: Duration::from_secs(8),
+            ..SessionPolicy::default()
+        });
+        store.insert("token".into(), Session::new("alice".into(), now));
+        let lease = store.lease("token", now).unwrap();
+        assert_eq!(*lease.expires.borrow(), now + Duration::from_secs(5));
+        store.username_for("token", now + Duration::from_secs(4));
+        assert_eq!(*lease.expires.borrow(), now + Duration::from_secs(8));
+        assert!(store.lease("token", now + Duration::from_secs(8)).is_none());
+        assert!(lease.expires.has_changed().is_err());
+    }
 
     #[test]
     fn sessions_expire_and_obey_limits() {

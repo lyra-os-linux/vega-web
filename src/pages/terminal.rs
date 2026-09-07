@@ -1,6 +1,6 @@
 use std::net::SocketAddr;
 
-use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
+use axum::extract::ws::{CloseFrame, Message, WebSocket, WebSocketUpgrade, close_code};
 use axum::extract::{ConnectInfo, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Redirect, Response};
@@ -13,7 +13,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UnixStream;
 
 use crate::auth::CurrentUser;
-use crate::state::{AppState, SESSION_COOKIE};
+use crate::state::{AppState, SESSION_COOKIE, SessionLease};
 
 use super::render;
 
@@ -140,7 +140,6 @@ pub async fn reauthenticate(
 pub async fn websocket(
     State(state): State<AppState>,
     jar: PrivateCookieJar,
-    Extension(CurrentUser(username)): Extension<CurrentUser>,
     headers: HeaderMap,
     ws: WebSocketUpgrade,
 ) -> Response {
@@ -154,6 +153,9 @@ pub async fn websocket(
     if !state.terminal_grants.consume(&token, Instant::now()) {
         return (StatusCode::FORBIDDEN, "reautenticação necessária").into_response();
     }
+    let Some(lease) = state.sessions.lease(&token, Instant::now()) else {
+        return (StatusCode::UNAUTHORIZED, "sessão encerrada").into_response();
+    };
     let permit = match state.terminal_slots.clone().try_acquire_owned() {
         Ok(permit) => permit,
         Err(_) => {
@@ -164,17 +166,42 @@ pub async fn websocket(
                 .into_response();
         }
     };
+    let socket_path = state.terminal_socket;
     ws.max_message_size(64 * 1024)
-        .on_upgrade(move |socket| run_terminal(socket, username, permit))
+        .on_upgrade(move |socket| run_terminal(socket, lease, permit, socket_path))
 }
 
 async fn run_terminal(
     mut socket: WebSocket,
-    username: String,
+    mut lease: SessionLease,
     _permit: tokio::sync::OwnedSemaphorePermit,
+    socket_path: String,
 ) {
-    let socket_path = std::env::var("VEGA_WEB_TERMINAL_SOCKET")
-        .unwrap_or_else(|_| "/run/vega-web/terminal.sock".into());
+    let username = lease.username.clone();
+    // Cancel the entire bridge, including connect and blocked writes. Merely
+    // selecting on revocation inside the read loop would leave those awaits
+    // alive after logout. Dropping the bridge closes both helper socket halves.
+    let revoked = tokio::select! {
+        biased;
+        _ = lease.revoked() => true,
+        _ = bridge_terminal(&mut socket, &username, &socket_path) => false,
+    };
+    let frame = CloseFrame {
+        code: if revoked {
+            close_code::POLICY
+        } else {
+            close_code::NORMAL
+        },
+        reason: "Sessão encerrada".into(),
+    };
+    let _ = tokio::time::timeout(
+        Duration::from_millis(250),
+        socket.send(Message::Close(Some(frame))),
+    )
+    .await;
+}
+
+async fn bridge_terminal(socket: &mut WebSocket, username: &str, socket_path: &str) {
     let stream = match UnixStream::connect(socket_path).await {
         Ok(stream) => stream,
         Err(error) => {
@@ -187,7 +214,7 @@ async fn run_terminal(
         }
     };
     let (mut output, mut input) = stream.into_split();
-    if write_user(&mut input, &username).await.is_err() {
+    if write_user(&mut input, username).await.is_err() {
         return;
     }
     let mut buffer = [0_u8; 8192];
@@ -297,6 +324,10 @@ fn asset(content_type: &'static str, body: &'static str) -> Response {
     );
     response
 }
+
+#[cfg(test)]
+#[path = "terminal_session_tests.rs"]
+mod session_tests;
 
 #[cfg(test)]
 mod tests {
