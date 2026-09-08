@@ -268,8 +268,18 @@ def main():
     until(lambda: command('firewall-cmd', '--state', check=False).returncode == 0)
     assert command('rpm', '--eval', '%{_dbpath}').stdout.strip() == '/var/lib/rpm'
     command('rpm', '--initdb')
-    command('zypper', '--non-interactive', 'addrepo', '--no-gpgcheck', '/packages', 'vm-native')
-    command('zypper', '--non-interactive', 'refresh')
+    packages = list(Path('/packages').glob('*.rpm'))
+    assert len(packages) == 1
+    assert command('rpm', '-qp', '--queryformat', '%{NAME}', str(packages[0])).stdout == PACKAGE
+    # State the local repository format explicitly across libzypp releases,
+    # and require a usable fixture before testing any administrative grant.
+    command('zypper', '--non-interactive', 'addrepo', '--type', 'plaindir',
+            '--no-gpgcheck', '/packages', 'vm-native')
+    refresh = command('zypper', '--non-interactive', 'refresh', '--force')
+    print('VM repository refresh:', refresh.stdout, refresh.stderr, flush=True)
+    available = command('zypper', '--non-interactive', '--no-refresh', 'search',
+                        '--details', '--match-exact', '--type', 'package', PACKAGE)
+    assert PACKAGE in available.stdout, (available.stdout, available.stderr)
     vegad_log = open('/var/log/vegad-test.log', 'w')
     subprocess.Popen(['/usr/lib/vega/vegad'], stdout=vegad_log, stderr=subprocess.STDOUT)
     until(lambda: command('python3', '-c', 'import dbus; assert dbus.SystemBus().name_has_owner("org.lyraos.Vega1")', check=False).returncode == 0)
@@ -400,8 +410,15 @@ assert all(outcome.values()), outcome
     with stream:
         transaction = commit(stream, grant)
     assert transaction is not None and transaction > 0
-    until(lambda: re.search(r'member=TransactionFinished\s+uint32 ' + str(transaction) +
-                           r'\s+boolean true', Path('/var/log/transactions.log').read_text()))
+    def installed():
+        events = Path('/var/log/transactions.log').read_text()
+        result = re.search(r'member=TransactionFinished\s+uint32 ' + str(transaction) +
+                           r'\s+boolean (true|false)', events)
+        if result is None:
+            return False
+        assert result[1] == 'true', events[-5000:]
+        return True
+    until(installed)
     until(lambda: Path('/usr/share/vega-web-broker-vm/proof').exists())
     command('rpm', '-q', PACKAGE)
     stream, grant2, audit2 = prepare()
