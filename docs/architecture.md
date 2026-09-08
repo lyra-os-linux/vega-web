@@ -86,6 +86,11 @@ ele só lê D-Bus público e checa senha via PAM, nada mais.
   chave de assinatura é gerada a cada start — reiniciar o serviço invalida
   todas as sessões, o que é intencional (evita guardar segredo persistente
   só para isso).
+- Os terminais observam a mesma sessão HTTP. Logout, remoção, substituição,
+  expulsão pelos limites do store e expiração revogam seus canais ativos.
+  Os prazos padrão são 30 minutos de inatividade HTTP e 12 horas desde o
+  login. Tráfego do terminal não prolonga esses prazos. Cada observador tem
+  seu próprio timer, sem depender de outra requisição para detectar expiração.
 - TLS: certificado autoassinado gerado no primeiro start
   (`VEGA_WEB_TLS_DIR`, padrão `/etc/vega/web/tls`, permissão `0600`). O
   aviso de certificado não confiável no navegador é esperado — ver
@@ -108,9 +113,28 @@ root de `vega-web-terminal@.service` para cada conexão. O broker:
 3. cria o PTY e, no filho, aplica `initgroups`, `setgid` e `setuid` antes de
    executar exclusivamente o shell cadastrado em `/etc/passwd`;
 4. limpa o ambiente, define um `PATH` fixo e inicia o shell como login shell;
-5. no broker pai, remove imediatamente root e grupos suplementares, ficando
-   apenas como `vega-web` para transportar bytes e redimensionamentos;
-6. encerra o grupo de processos da sessão quando a conexão é fechada.
+5. cria um encaminhador que remove root e grupos suplementares, ficando
+   como `vega-web` para interpretar quadros, transportar bytes e redimensionar
+   o PTY;
+6. mantém um supervisor root que observa desconexão e término dos filhos,
+   e revalida a identidade e participação em `wheel` a cada segundo;
+7. ao encerrar, termina o encaminhador e sinaliza o shell/grupo com HUP,
+   seguido de KILL após até 500 ms. Conserva os filhos sem coletá-los até
+   concluir os sinais, evitando reutilização de PID nesse intervalo.
+
+O supervisor precisa conservar root para sinalizar o shell de outro UID;
+ele não interpreta os quadros de entrada após a identidade inicial. O
+`KillMode=control-group` da unidade termina também descendentes que criaram
+outra sessão ou grupo de processos. Descendentes que ignoram TERM são
+eliminados pelo systemd ao atingir `TimeoutStopSec=5`.
+
+A revogação HTTP cancela toda a ponte WebSocket/IPC, incluindo conexão e
+escritas bloqueadas. O fechamento do socket chega ao supervisor mesmo se
+o encaminhador estiver bloqueado no PTY. A tentativa de enviar o quadro
+WebSocket Close tem prazo de 250 ms; o término da tarefa libera sua vaga.
+Uma nova conexão exige sessão válida e uma nova concessão de reautenticação.
+
+Os ensaios e seus limites estão em [terminal-sessions.md](terminal-sessions.md).
 
 O painel segue com `NoNewPrivileges=true`, `ProtectHome=true` e seu sandbox
 original. Somente a unidade socket-activated da sessão fica fora desse
