@@ -12,7 +12,7 @@ pub async fn handler(
     State(state): State<AppState>,
     Extension(user): Extension<CurrentUser>,
 ) -> Html<String> {
-    let mut body = super::ADMINISTRATION_UNAVAILABLE_NOTICE.to_string();
+    let mut body = super::admin::notice(&state);
     let net = state.dbus.network();
 
     match net.interfaces().await {

@@ -20,9 +20,10 @@ def main():
     vm = SystemdVM('auth', 'lyra-auth-test-vm')
     for name in ['sleep', 'false', 'ip', 'dbus-daemon', 'gpasswd', 'getent', 'id', 'cut']:
         vm.tool(name)
-    for name in ['vega-web', 'vega-web-auth-helper', 'vega-web-terminal-helper']:
+    for name in ['vega-web', 'vega-web-auth-helper', 'vega-web-admin-helper', 'vega-web-terminal-helper']:
         vm.binary(args.bin_dir / name, '/usr/lib/vega/' + name)
     for name in ['vega-web.service', 'vega-web-auth.socket', 'vega-web-auth@.service',
+                 'vega-web-admin.socket', 'vega-web-admin@.service',
                  'vega-web-terminal.socket', 'vega-web-terminal@.service']:
         vm.put('/candidate/' + name, (REPO / 'packaging' / name).read_text())
         if name != 'vega-web.service':

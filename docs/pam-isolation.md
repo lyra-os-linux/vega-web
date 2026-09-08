@@ -18,8 +18,9 @@ O HTTPS ainda recebe a senha enviada pelo navegador e confia no resultado
 do helper. Comprometer o HTTPS continua expondo credenciais em trânsito pela
 aplicação e permitindo tentativas online pelo IPC; o isolamento retira seu
 acesso direto aos hashes. PAM, seus módulos, systemd e o helper root fazem
-parte da fronteira privilegiada. Isto não implementa o broker de autorização
-administrativa pendente da [autorização web](web-authorization.md).
+parte da fronteira privilegiada. A reautenticação administrativa usa outro
+helper, com concessão de uso único e Polkit, descrito em
+[autorização web](web-authorization.md).
 
 ## Helper e protocolo
 

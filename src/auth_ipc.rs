@@ -140,6 +140,10 @@ pub struct DeadlineStream {
 }
 
 impl DeadlineStream {
+    pub fn into_inner(self) -> UnixStream {
+        self.stream
+    }
+
     pub fn new(stream: UnixStream, timeout: Duration) -> Self {
         Self {
             stream,

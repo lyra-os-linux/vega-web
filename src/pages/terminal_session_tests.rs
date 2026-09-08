@@ -92,6 +92,7 @@ async fn exercise_session(scenario: &str) {
         pam_slots: Arc::new(Semaphore::new(1)),
         terminal_grants: grants.clone(),
         terminal_slots: slots.clone(),
+        admin_socket: None,
         terminal_socket: path.to_str().unwrap().into(),
     };
     let router = Router::new()
