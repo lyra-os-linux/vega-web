@@ -71,13 +71,33 @@ impl Agent {
         )
         .await
         .map_err(|_| denied())?;
-        authority
+        let response = authority
             .call::<_, _, ()>(
                 "AuthenticationAgentResponse2",
-                &(self.uid, cookie.as_str(), identity),
+                &(self.uid, cookie.as_str(), &identity),
             )
-            .await
-            .map_err(|_| denied())?;
+            .await;
+        match response {
+            Ok(()) => {}
+            // Older Polkit (including 124) binds the cookie to the UID that
+            // registered the agent (root here). Newer releases bind it to the
+            // subject UID. Retry only this precise lookup failure, keeping
+            // the authenticated identity, cookie and Authority owner intact.
+            // Never use the legacy API or its wildcard UID (-1).
+            Err(zbus::Error::MethodError(name, Some(message), _))
+                if name.as_str() == "org.freedesktop.PolicyKit1.Error.Failed"
+                    && message == "No session for cookie" =>
+            {
+                authority
+                    .call::<_, _, ()>(
+                        "AuthenticationAgentResponse2",
+                        &(0u32, cookie.as_str(), &identity),
+                    )
+                    .await
+                    .map_err(|_| denied())?;
+            }
+            Err(_) => return Err(denied()),
+        }
         eprintln!(
             "vega-web-admin: id={} uid={} action={} phase=polkit-authenticated",
             self.audit, self.uid, self.action

@@ -70,6 +70,15 @@ Polkit no barramento, a ação prevista e a identidade que o PAM autenticou;
 responde a um único desafio. Não registra um agente para toda a sessão do
 usuário. Somente root pode enviar `AuthenticationAgentResponse2` ao Polkit.
 
+Polkit 124 vincula o cookie ao UID que registrou o agente (root neste
+fluxo); Polkit 127 o vincula ao UID do processo atendido. O broker tenta
+esse último e só repete com o UID do agente se receber exatamente
+`org.freedesktop.PolicyKit1.Error.Failed: No session for cookie` da mesma
+Authority. A identidade autenticada permanece a do usuário em ambas as
+tentativas. Não usa o método legado nem UID curinga. A diferença está no
+[registro em 124](https://github.com/polkit-org/polkit/blob/124/src/polkitbackend/polkitbackendinteractiveauthority.c)
+e no [registro em 127](https://github.com/polkit-org/polkit/blob/127/src/polkitbackend/polkitbackendinteractiveauthority.c).
+
 O fluxo usa a autenticação do Polkit sem simular uma sessão local ativa.
 Não depende de `subject.system_unit`: no Leap examinado, D-Bus 1.14.10 não
 entrega o pidfd seguro necessário ao Polkit 127 para essa propriedade.
