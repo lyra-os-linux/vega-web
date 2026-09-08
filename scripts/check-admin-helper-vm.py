@@ -34,9 +34,12 @@ def main():
                         ignore=shutil.ignore_patterns('__pycache__', 'tests', 'test'))
 
     for name in ['sleep', 'false', 'ip', 'dbus-daemon', 'dbus-monitor', 'getent', 'id', 'pkcheck',
-                 'rpm', 'rpmdb', 'rpmkeys', 'rpmdb2solv', 'repo2solv',
+                 'rpm', 'rpmdb', 'rpmkeys', 'rpmdb2solv', 'repo2solv', 'find',
                  'zypper', 'modprobe', 'nft', 'journalctl', 'gpasswd']:
         vm.tool(name)
+    # libsolv 0.7.28's repo2solv enumerates plain-directory RPMs by
+    # execing /usr/bin/find. ldd cannot discover that runtime dependency;
+    # without it, repo2solv can return success with an empty package pool.
     (vm.root / 'usr/sbin').symlink_to('bin')
     (vm.root / 'sbin').symlink_to('usr/bin')
     vm.binary(args.vegad, '/usr/lib/vega/vegad')
