@@ -31,3 +31,4 @@ gettext-rs = { version = "0.7.7", features = ["gettext-system"] }
 futures-util = { version = "0.3.34", features = ["sink"] }
 tokio-tungstenite = "0.29.0"
 tempfile = "3.27.0"
+zbus = "5.19.0"

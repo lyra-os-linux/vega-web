@@ -5,6 +5,9 @@ mod pam_ffi;
 mod state;
 mod tls;
 
+#[cfg(test)]
+mod authorization_tests;
+
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -70,11 +73,21 @@ async fn main() {
     .await
     .expect("não foi possível preparar o certificado TLS");
 
+    let app = build_router(state);
+
+    eprintln!("vega-web: ouvindo em https://{bind_addr}");
+    axum_server::bind_rustls(bind_addr, tls_config)
+        .serve(app.into_make_service_with_connect_info::<SocketAddr>())
+        .await
+        .expect("falha ao servir HTTPS");
+}
+
+fn build_router(state: AppState) -> Router {
     let protected = Router::new()
         .route("/", get(pages::dashboard::handler))
         .route(
             "/software",
-            get(pages::software::handler).post(pages::software::install_native),
+            get(pages::software::handler).post(pages::administration_unavailable),
         )
         .route("/backup", get(pages::backup::handler))
         .route("/snapshots", get(pages::snapshots::handler))
@@ -82,7 +95,7 @@ async fn main() {
         .route("/armazenamento", get(pages::storage::handler))
         .route(
             "/rede",
-            get(pages::network::handler).post(pages::network::add_firewall_rule),
+            get(pages::network::handler).post(pages::administration_unavailable),
         )
         .route("/servicos", get(pages::services::handler))
         .route("/usuarios", get(pages::users::handler))
@@ -101,16 +114,10 @@ async fn main() {
             auth::require_session,
         ));
 
-    let app = protected
+    protected
         .route("/login", get(auth::login_form).post(auth::login_submit))
         .route("/logout", post(auth::logout))
-        .with_state(state);
-
-    eprintln!("vega-web: ouvindo em https://{bind_addr}");
-    axum_server::bind_rustls(bind_addr, tls_config)
-        .serve(app.into_make_service_with_connect_info::<SocketAddr>())
-        .await
-        .expect("falha ao servir HTTPS");
+        .with_state(state)
 }
 
 fn env_or(key: &str, default: &str) -> String {

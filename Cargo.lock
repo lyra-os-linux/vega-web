@@ -1959,6 +1959,7 @@ dependencies = [
  "time",
  "tokio",
  "tokio-tungstenite",
+ "zbus",
 ]
 
 [[package]]

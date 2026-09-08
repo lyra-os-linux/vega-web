@@ -1,8 +1,9 @@
 # Arquitetura do vega-web
 
 Status: painel de administração e terminal web implementados. As páginas de
-configuração continuam somente-leitura; o terminal é uma fronteira separada,
-restrita a administradores.
+configuração continuam somente-leitura; instalação e alteração do firewall
+estão indisponíveis até existir autorização por usuário. O terminal é uma
+fronteira separada, restrita a administradores.
 
 ## Objetivo e limites
 
@@ -144,20 +145,13 @@ afrouxar o processo HTTPS exposto à rede.
 
 ## Fase 2 — demais ações privilegiadas (ainda não implementada)
 
-Para preservar as regras de polkit por usuário (`packaging/vegad/org.lyraos.vega.policy`,
-todas `auth_admin` interativo) sem alterar `vegad`, a Fase 2 precisa de:
+As chamadas de instalação e firewall pelo UID compartilhado do serviço foram
+retiradas. Os POST antigos falham com HTTP 403 sem acionar o daemon, e os
+controles indisponíveis não são oferecidos nas páginas.
 
-1. Reautenticação estilo `sudo` na sessão web antes de qualquer ação de
-   escrita.
-2. Um binário setuid pequeno e separado (`vega-web-helper`) que dropa
-   privilégio para o UID real do usuário autenticado antes de abrir sua
-   própria conexão ao system bus — só assim a chamada chega ao `vegad` com
-   o peer credential correto.
-3. Um agente `org.freedesktop.PolicyKit1.AuthenticationAgent` implementado
-   pelo helper, para responder ao `auth_admin` interativo sem sessão
-   gráfica (mesmo padrão do `cockpit-session`/`cockpit-polkit`).
-4. Piloto numa ação só (`org.lyraos.vega.services.configure`, ligar/desligar
-   um serviço) antes de expandir para as outras 16 ações mutantes.
-
-Ver o plano completo desta decisão no histórico da issue/PR que introduziu
-o `vega-web`.
+O desenho futuro exige autenticação vinculada a uma concessão revogável,
+broker separado e conexão D-Bus aberta pelo UID real. Também precisa resolver
+e validar o contexto remoto de PAM/Polkit: a política atual do `vegad` nega
+`allow_any` e `allow_inactive`, então UID correto e agente de autenticação
+sozinhos não garantem autorização. O contrato, a auditoria e os critérios de
+habilitação estão em [web-authorization.md](web-authorization.md).
