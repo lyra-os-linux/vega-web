@@ -26,6 +26,7 @@ time = { version = "0.3.55", features = ["formatting"] }
 libc = "0.2.189"
 serde = { version = "1.0.228", features = ["derive"] }
 gettext-rs = { version = "0.7.7", features = ["gettext-system"] }
+zeroize = { version = "1.9.0", features = ["std"] }
 
 [dev-dependencies]
 futures-util = { version = "0.3.34", features = ["sink"] }

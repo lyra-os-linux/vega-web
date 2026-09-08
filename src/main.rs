@@ -1,7 +1,6 @@
 mod auth;
 mod layout;
 mod pages;
-mod pam_ffi;
 mod state;
 mod tls;
 
@@ -31,7 +30,13 @@ async fn main() {
         .parse()
         .expect("VEGA_WEB_BIND deve ser um endereço host:porta válido");
     let tls_dir = PathBuf::from(env_or("VEGA_WEB_TLS_DIR", "/etc/vega/web/tls"));
-    let pam_service = env_or("VEGA_WEB_PAM_SERVICE", "vega-web");
+    if std::env::var("VEGA_WEB_PAM_SERVICE").is_ok_and(|service| service != "vega-web") {
+        eprintln!(
+            "vega-web: configure a pilha PAM em /etc/pam.d/vega-web; VEGA_WEB_PAM_SERVICE personalizado não é mais aceito"
+        );
+        std::process::exit(1);
+    }
+    let auth_socket = env_or("VEGA_WEB_AUTH_SOCKET", "/run/vega-web-auth.sock");
     let default_tls_names = default_tls_names(bind_addr);
     let tls_names: Vec<String> = env_or("VEGA_WEB_TLS_NAMES", &default_tls_names)
         .split(',')
@@ -52,7 +57,7 @@ async fn main() {
             per_user_limit: env_usize("VEGA_WEB_SESSION_USER_LIMIT", 10),
         }),
         cookie_key: Key::generate(),
-        authenticator: Arc::new(PamAuthenticator::new(pam_service)),
+        authenticator: Arc::new(PamAuthenticator::new(auth_socket)),
         login_limiter: LoginLimiter::new(LoginPolicy {
             attempts: env_u64("VEGA_WEB_LOGIN_ATTEMPTS", 5) as u32,
             recovery: Duration::from_secs(env_u64("VEGA_WEB_LOGIN_RECOVERY_SECS", 900)),

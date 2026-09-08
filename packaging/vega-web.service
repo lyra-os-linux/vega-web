@@ -1,8 +1,8 @@
 [Unit]
 Description=Vega web control panel (HTTPS, LAN)
 Documentation=https://lyraos.com.br/vega
-Requires=vega-web-terminal.socket
-After=network.target vegad.service vega-web-terminal.socket
+Requires=vega-web-terminal.socket vega-web-auth.socket
+After=network.target vegad.service vega-web-terminal.socket vega-web-auth.socket
 
 [Service]
 ExecStart=/usr/lib/vega/vega-web
@@ -11,20 +11,21 @@ Group=vega-web
 Environment=VEGA_WEB_BIND=0.0.0.0:9090
 Environment=VEGA_WEB_TLS_DIR=/etc/vega/web/tls
 Environment=VEGA_WEB_TLS_NAMES=%H,localhost,127.0.0.1,::1
-Environment=VEGA_WEB_PAM_SERVICE=vega-web
+Environment=VEGA_WEB_AUTH_SOCKET=/run/vega-web-auth.sock
 Environment=VEGA_WEB_TERMINAL_SOCKET=/run/vega-web-terminal.sock
 Environment=VEGA_WEB_TERMINAL_LIMIT=4
 Restart=on-failure
 RestartSec=5
 
 # Serviço de rede sem privilégios: somente TLS e estado efêmero do Vega
-# permanecem graváveis. PAM precisa ler a configuração do host, mas não
-# requer acesso aos diretórios pessoais para pam_authenticate/account.
+# permanecem graváveis. O processo HTTPS não carrega PAM nem lê hashes;
+# autenticação/account management ocorrem no helper separado.
 NoNewPrivileges=true
 PrivateTmp=true
 PrivateDevices=true
 ProtectSystem=strict
 ProtectHome=true
+InaccessiblePaths=-/etc/shadow -/etc/shadow- -/etc/gshadow -/etc/gshadow- -/etc/security/opasswd
 ReadWritePaths=/etc/vega/web/tls /var/lib/vega-web
 ProtectKernelTunables=true
 ProtectKernelModules=true
@@ -42,6 +43,7 @@ AmbientCapabilities=
 SystemCallArchitectures=native
 SystemCallFilter=@system-service
 UMask=0077
+LimitCORE=0
 
 # Ao contrário do vegad (ativado sob demanda pelo D-Bus), o vega-web é um
 # serviço de rede de longa duração — precisa de [Install] para

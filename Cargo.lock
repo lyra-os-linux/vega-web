@@ -1960,6 +1960,7 @@ dependencies = [
  "tokio",
  "tokio-tungstenite",
  "zbus",
+ "zeroize",
 ]
 
 [[package]]

@@ -27,22 +27,25 @@ redes em que você confia nos outros dispositivos.
   `wheel`; ele é um shell completo e, portanto, tem a mesma capacidade da
   conta em uma sessão SSH, inclusive `sudo` quando a política local permitir.
 - **Credenciais**: a senha digitada no login é usada uma única vez, na
-  chamada a `pam_authenticate`, e não é armazenada em nenhum lugar — nem em
-  log, nem em disco, nem na sessão. A sessão guarda só o nome do usuário.
+  chamada PAM no helper separado. Permanece em memória durante o pedido,
+  sem persistência pelo Vega em log, disco ou sessão. A sessão guarda só o nome do usuário.
 
 ## Autenticação
 
 O login usa as contas Linux já existentes na máquina via PAM (serviço
 `vega-web`, `/etc/pam.d/vega-web` — inclui as mesmas regras de
 `common-auth`/`common-account` usadas pelo resto do sistema). Isso quer
-dizer que qualquer política que já vale para o login do sistema
-(bloqueio por tentativas, expiração de senha, contas desabilitadas) também
-vale aqui, automaticamente.
+dizer que o helper aplica a autenticação e as restrições de conta dessas
+pilhas. Expiração de senha/conta e contas bloqueadas são recusadas. Módulos
+PAM personalizados precisam ser qualificados no sandbox do helper; veja
+[isolamento PAM](pam-isolation.md). O HTTPS não pertence ao grupo `shadow`
+e não carrega `libpam`.
 
 ## Proteções operacionais
 
 - Tentativas de login são limitadas por IP e usuário, com atraso progressivo,
-  recuperação após 15 minutos e no máximo quatro autenticações PAM simultâneas.
+  bloqueio por 15 minutos ao atingir cinco falhas e no máximo quatro
+  autenticações PAM simultâneas. Login e terminal compartilham esses limites.
 - Sessões expiram após 30 minutos sem atividade ou 12 horas absolutas. O
   armazenamento aceita até 1024 sessões, no máximo 10 por usuário.
 - Sucessos, falhas, bloqueios e saturação do PAM são registrados no journal,

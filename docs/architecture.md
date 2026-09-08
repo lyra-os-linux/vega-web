@@ -34,12 +34,12 @@ enxergá-los sem precisar impersonar UID nenhum.
 ```text
 vega-web/
 ├── Cargo.toml
-├── build.rs          # cargo:rustc-link-lib=pam — sem bindgen/clang
+├── build.rs          # libpam ligada somente ao helper de autenticação
 └── src/
     ├── main.rs        # wiring: TLS, D-Bus, rotas, servidor axum
     ├── state.rs        # AppState, SessionStore (em memória)
     ├── auth.rs         # login/logout, middleware require_session
-    ├── pam_ffi.rs       # bindings manuais com libpam (auth + acct)
+    ├── pam_ffi.rs       # bindings libpam, compilados somente no helper
     ├── tls.rs          # certificado autoassinado (gerado no 1º start)
     ├── layout.rs        # HTML compartilhado (sem framework JS)
     └── pages/
@@ -63,21 +63,20 @@ código de autenticação, o hand-roll também fica pequeno o bastante para
 revisar por inteiro, em vez de confiar numa dependência externa com cadeia
 de build maior.
 
-### Por que rodar como usuário de sistema sem privilégio
+### Isolamento de PAM e hashes
 
-`pam_unix.so`, quando o processo chamador não é root, delega a checagem de
-senha para `/usr/sbin/unix_chkpwd` (setuid-root, grupo `shadow`) — então
-`vega-web` autentica contas normais do sistema sem precisar ler
-`/etc/shadow` nem rodar como root. Mas como `vega-web` está checando a
-senha de **outro** usuário (quem faz login no painel, não a própria conta
-de serviço), `unix_chkpwd` só autoriza isso se o chamador for root ou
-estiver no grupo `shadow` — por isso `packaging/vega-web/sysusers.d/vega-web.conf`
-inclui `m vega-web shadow` além de criar o usuário. Sem essa linha, o login
-falha silenciosamente mesmo com a senha certa (foi exatamente o que
-aconteceu na primeira instalação de teste, antes dessa linha existir). O
-serviço systemd roda como o usuário dedicado `vega-web` (criado via
-`sysusers.d`), consistente com o desenho de mínimo privilégio: nesta fase
-ele só lê D-Bus público e checa senha via PAM, nada mais.
+O HTTPS roda como `vega-web`, sem associação a `shadow` e sem carregar
+`libpam`. Login e reautenticação encaminham um pedido limitado ao helper
+root ativado por `vega-web-auth.socket`. Os dois lados conferem o UID do
+peer; o helper executa autenticação e account management usando a pilha
+fixa `/etc/pam.d/vega-web`. A conexão não permite escolher comandos ou outra
+pilha PAM. O prazo da instância e a limpeza dos filhos são controlados por
+systemd, preservando as vagas e os limites do frontend.
+
+Atualizações removem a associação antiga a `shadow` e encerram o processo
+anterior antes de reiniciar; a unit também oculta os arquivos de hashes.
+Protocolo, limites de confiança, configuração e qualificação estão em
+[pam-isolation.md](pam-isolation.md).
 
 ### Sessão e TLS
 
@@ -95,7 +94,7 @@ ele só lê D-Bus público e checa senha via PAM, nada mais.
 - TLS: certificado autoassinado gerado no primeiro start
   (`VEGA_WEB_TLS_DIR`, padrão `/etc/vega/web/tls`, permissão `0600`). O
   aviso de certificado não confiável no navegador é esperado — ver
-  `docs/vega-web-privacidade.md`.
+  `docs/privacidade.md`.
 
 ## Terminal web administrativo
 

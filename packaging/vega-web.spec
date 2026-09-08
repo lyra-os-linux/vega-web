@@ -24,6 +24,7 @@ Requires:       vegad
 Requires:       pam
 Requires(pre):    sysuser-tools
 Requires(post):   systemd
+Requires(post):   shadow
 Requires(preun):  systemd
 Requires(postun): systemd
 
@@ -47,6 +48,14 @@ install -Dm755 target/release/vega-web \
   %{buildroot}%{_prefix}/lib/vega/vega-web
 install -Dm755 target/release/vega-web-terminal-helper \
   %{buildroot}%{_prefix}/lib/vega/vega-web-terminal-helper
+install -Dm755 target/release/vega-web-auth-helper \
+  %{buildroot}%{_prefix}/lib/vega/vega-web-auth-helper
+install -Dm755 packaging/migrate-auth.sh \
+  %{buildroot}%{_prefix}/lib/vega/vega-web-migrate-auth
+install -Dm644 packaging/vega-web-auth.socket \
+  %{buildroot}%{_prefix}/lib/systemd/system/vega-web-auth.socket
+install -Dm644 packaging/vega-web-auth@.service \
+  %{buildroot}%{_prefix}/lib/systemd/system/vega-web-auth@.service
 install -Dm644 packaging/vega-web.service \
   %{buildroot}%{_prefix}/lib/systemd/system/vega-web.service
 install -Dm644 packaging/vega-web-terminal.socket \
@@ -63,9 +72,14 @@ install -Dm644 packaging/pam.d/vega-web \
 %files
 %doc docs/terminal-sessions.md
 %doc docs/web-authorization.md
+%doc docs/pam-isolation.md
 %dir %{_prefix}/lib/vega
 %{_prefix}/lib/vega/vega-web
 %{_prefix}/lib/vega/vega-web-terminal-helper
+%{_prefix}/lib/vega/vega-web-auth-helper
+%{_prefix}/lib/vega/vega-web-migrate-auth
+%{_prefix}/lib/systemd/system/vega-web-auth.socket
+%{_prefix}/lib/systemd/system/vega-web-auth@.service
 %{_prefix}/lib/systemd/system/vega-web.service
 %{_prefix}/lib/systemd/system/vega-web-terminal.socket
 %{_prefix}/lib/systemd/system/vega-web-terminal@.service
@@ -80,7 +94,7 @@ install -Dm644 packaging/pam.d/vega-web \
 
 %post
 systemd-tmpfiles --create %{_prefix}/lib/tmpfiles.d/vega-web.conf 2>/dev/null || true
-systemctl daemon-reload
+%{_prefix}/lib/vega/vega-web-migrate-auth
 # Não habilitado por padrão: expor um painel de administração na rede é uma
 # decisão explícita do administrador, não algo que a instalação do pacote
 # deve ligar sozinha.
