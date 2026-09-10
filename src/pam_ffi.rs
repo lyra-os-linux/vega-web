@@ -3,6 +3,7 @@
 //! da conta, na convenção Linux-PAM (não Solaris-PAM) de `pam_message`.
 use std::ffi::{CStr, CString, c_char, c_int, c_void};
 use std::ptr;
+use zeroize::Zeroizing;
 
 const PAM_SUCCESS: c_int = 0;
 const PAM_PROMPT_ECHO_OFF: c_int = 1;
@@ -11,6 +12,7 @@ const PAM_ERROR_MSG: c_int = 3;
 const PAM_TEXT_INFO: c_int = 4;
 const PAM_CONV_ERR: c_int = 19;
 const PAM_SILENT: c_int = 0x8000;
+const PAM_DISALLOW_NULL_AUTHTOK: c_int = 0x0001;
 
 #[repr(C)]
 struct PamMessage {
@@ -57,7 +59,7 @@ unsafe extern "C" {
 
 struct ConvData {
     username: CString,
-    password: CString,
+    password: Zeroizing<CString>,
 }
 
 /// Callback de conversa do PAM: não interativo, responde diretamente com a
@@ -70,7 +72,7 @@ unsafe extern "C" fn conversation(
     resp: *mut *mut PamResponse,
     appdata_ptr: *mut c_void,
 ) -> c_int {
-    if num_msg <= 0 || msg.is_null() || appdata_ptr.is_null() {
+    if num_msg <= 0 || num_msg > 32 || msg.is_null() || resp.is_null() || appdata_ptr.is_null() {
         return PAM_CONV_ERR;
     }
     let data = unsafe { &*(appdata_ptr as *const ConvData) };
@@ -82,6 +84,10 @@ unsafe extern "C" fn conversation(
     }
 
     for i in 0..count {
+        if unsafe { *msg.add(i) }.is_null() {
+            free_responses(out, i);
+            return PAM_CONV_ERR;
+        }
         let message = unsafe { &**msg.add(i) };
         let reply: Option<&CStr> = match message.msg_style {
             PAM_PROMPT_ECHO_OFF => Some(data.password.as_c_str()),
@@ -141,7 +147,9 @@ pub fn authenticate(service: &str, username: &str, password: &str) -> Result<(),
     let user = CString::new(username).map_err(|_| AuthError("nome de usuário inválido".into()))?;
     let data = Box::new(ConvData {
         username: user.clone(),
-        password: CString::new(password).map_err(|_| AuthError("senha inválida".into()))?,
+        password: Zeroizing::new(
+            CString::new(password).map_err(|_| AuthError("senha inválida".into()))?,
+        ),
     });
     let data_ptr = Box::into_raw(data);
 
@@ -160,9 +168,9 @@ pub fn authenticate(service: &str, username: &str, password: &str) -> Result<(),
         return Err(AuthError(format!("pam_start falhou (código {start_rc})")));
     }
 
-    let auth_rc = unsafe { pam_authenticate(handle, PAM_SILENT) };
+    let auth_rc = unsafe { pam_authenticate(handle, PAM_SILENT | PAM_DISALLOW_NULL_AUTHTOK) };
     let acct_rc = if auth_rc == PAM_SUCCESS {
-        unsafe { pam_acct_mgmt(handle, PAM_SILENT) }
+        unsafe { pam_acct_mgmt(handle, PAM_SILENT | PAM_DISALLOW_NULL_AUTHTOK) }
     } else {
         auth_rc
     };
@@ -179,7 +187,7 @@ pub fn authenticate(service: &str, username: &str, password: &str) -> Result<(),
     };
 
     unsafe {
-        pam_end(handle, if result.is_ok() { PAM_SUCCESS } else { auth_rc });
+        pam_end(handle, acct_rc);
     }
 
     result

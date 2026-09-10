@@ -115,7 +115,7 @@ pub async fn reauthenticate(
         }
     };
     let auth = Arc::clone(&state.authenticator);
-    let password = form.password;
+    let password = zeroize::Zeroizing::new(form.password);
     let check_user = username.clone();
     let result = tokio::task::spawn_blocking(move || {
         let _permit = permit;

@@ -10,7 +10,6 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use crate::layout::login_page;
-use crate::pam_ffi;
 use crate::state::{AppState, SESSION_COOKIE, Session};
 
 pub trait Authenticator: Send + Sync {
@@ -18,19 +17,21 @@ pub trait Authenticator: Send + Sync {
 }
 
 pub struct PamAuthenticator {
-    service: String,
+    socket: std::path::PathBuf,
 }
 
 impl PamAuthenticator {
-    pub fn new(service: String) -> Self {
-        Self { service }
+    pub fn new(socket: String) -> Self {
+        Self {
+            socket: socket.into(),
+        }
     }
 }
 
 impl Authenticator for PamAuthenticator {
     fn authenticate(&self, username: &str, password: &str) -> Result<(), String> {
-        pam_ffi::authenticate(&self.service, username, password)
-            .map_err(|error| format!("{error:?}"))
+        vega_web::auth_ipc::authenticate(&self.socket, username, password)
+            .map_err(|_| "authentication unavailable or rejected".into())
     }
 }
 
@@ -87,7 +88,7 @@ pub async fn login_submit(
     let now = Instant::now();
     if let Some(wait) = state.login_limiter.check(&ip, &username, now) {
         eprintln!(
-            "vega-web: login bloqueado ip={ip} usuário={username} espera={}s",
+            "vega-web: login bloqueado ip={ip} usuário={username:?} espera={}s",
             wait.as_secs().max(1)
         );
         return Html(login_page(Some(
@@ -100,7 +101,7 @@ pub async fn login_submit(
         Ok(permit) => permit,
         Err(_) => {
             eprintln!(
-                "vega-web: login recusado por limite de autenticações simultâneas ip={ip} usuário={username}"
+                "vega-web: login recusado por limite de autenticações simultâneas ip={ip} usuário={username:?}"
             );
             return Html(login_page(Some(
                 "Servidor de autenticação ocupado. Tente novamente.",
@@ -111,7 +112,7 @@ pub async fn login_submit(
     let result = run_authentication(
         Arc::clone(&state.authenticator),
         username.clone(),
-        form.password.clone(),
+        form.password,
         permit,
     )
     .await;
@@ -119,7 +120,7 @@ pub async fn login_submit(
     match result {
         Ok(Ok(())) => {
             state.login_limiter.success(&ip, &username);
-            eprintln!("vega-web: login bem-sucedido ip={ip} usuário={username}");
+            eprintln!("vega-web: login bem-sucedido ip={ip} usuário={username:?}");
             let token = new_session_token();
             state
                 .sessions
@@ -129,13 +130,13 @@ pub async fn login_submit(
         }
         Ok(Err(_)) => {
             let delay = state.login_limiter.failure(&ip, &username, Instant::now());
-            eprintln!("vega-web: login falhou ip={ip} usuário={username}");
+            eprintln!("vega-web: login falhou ip={ip} usuário={username:?}");
             tokio::time::sleep(delay).await;
             Html(login_page(Some("Usuário ou senha inválidos."))).into_response()
         }
         Err(error) => {
             let delay = state.login_limiter.failure(&ip, &username, Instant::now());
-            eprintln!("vega-web: tarefa PAM falhou ip={ip} usuário={username}: {error}");
+            eprintln!("vega-web: tarefa PAM falhou ip={ip} usuário={username:?}: {error}");
             tokio::time::sleep(delay).await;
             Html(login_page(Some("Falha temporária na autenticação."))).into_response()
         }
@@ -176,6 +177,7 @@ async fn run_authentication(
 ) -> Result<Result<(), String>, tokio::task::JoinError> {
     tokio::task::spawn_blocking(move || {
         let _permit = permit;
+        let password = zeroize::Zeroizing::new(password);
         authenticator.authenticate(&username, &password)
     })
     .await

@@ -268,7 +268,9 @@ impl LoginLimiter {
             let progressive = self.policy.base_delay.saturating_mul(multiplier);
             delay = delay.max(progressive.min(self.policy.max_delay));
             if value.failures >= self.policy.attempts {
-                value.blocked_until = now + delay;
+                // The handler already waits `delay` before replying. Keep
+                // the threshold lockout after that response, until recovery.
+                value.blocked_until = now + self.policy.recovery.max(delay);
             }
         }
         delay
@@ -303,6 +305,28 @@ impl FromRef<AppState> for Key {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn login_threshold_remains_blocked_after_response_delay() {
+        let now = Instant::now();
+        let limiter = LoginLimiter::new(LoginPolicy {
+            attempts: 2,
+            recovery: Duration::from_secs(60),
+            base_delay: Duration::from_secs(1),
+            max_delay: Duration::from_secs(3),
+        });
+        limiter.failure("10.0.0.1", "alice", now);
+        let delay = limiter.failure("10.0.0.1", "alice", now);
+        let after_reply = now + delay + Duration::from_millis(1);
+        assert!(limiter.check("10.0.0.1", "bob", after_reply).is_some());
+        assert!(limiter.check("10.0.0.2", "ALICE", after_reply).is_some());
+        assert!(limiter.check("10.0.0.2", "bob", after_reply).is_none());
+        assert!(
+            limiter
+                .check("10.0.0.1", "alice", now + Duration::from_secs(60))
+                .is_none()
+        );
+    }
 
     #[tokio::test]
     async fn session_removal_eviction_and_replacement_revoke_all_terminals() {

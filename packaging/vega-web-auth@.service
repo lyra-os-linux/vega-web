@@ -1,0 +1,36 @@
+[Unit]
+Description=Vega web PAM authentication request
+PartOf=vega-web.service
+
+[Service]
+ExecStart=/usr/lib/vega/vega-web-auth-helper --socket
+StandardInput=socket
+StandardOutput=inherit
+StandardError=journal
+RuntimeMaxSec=30
+TimeoutStopSec=2
+KillMode=control-group
+LimitCORE=0
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+# PAM stacks using faillock may write only their own counters. Custom PAM
+# modules needing other state paths require an explicit administrator override.
+ReadWritePaths=-/run/faillock -/var/lib/faillock
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectKernelLogs=true
+ProtectControlGroups=true
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=
+AmbientCapabilities=
+SystemCallArchitectures=native
+SystemCallFilter=@system-service

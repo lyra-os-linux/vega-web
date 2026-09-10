@@ -7,8 +7,8 @@ fn main() {
     .into_iter()
     .find(|path| std::path::Path::new(path).exists());
     if let Some(path) = runtime_only {
-        println!("cargo:rustc-link-arg={path}");
+        println!("cargo:rustc-link-arg-bin=vega-web-auth-helper={path}");
     } else {
-        println!("cargo:rustc-link-lib=pam");
+        println!("cargo:rustc-link-arg-bin=vega-web-auth-helper=-lpam");
     }
 }

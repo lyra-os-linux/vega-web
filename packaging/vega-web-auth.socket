@@ -1,0 +1,15 @@
+[Unit]
+Description=Vega web PAM authentication socket
+PartOf=vega-web.service
+
+[Socket]
+ListenStream=/run/vega-web-auth.sock
+SocketUser=root
+SocketGroup=vega-web
+SocketMode=0660
+Accept=yes
+MaxConnections=4
+RemoveOnStop=true
+
+[Install]
+WantedBy=sockets.target

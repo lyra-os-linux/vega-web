@@ -30,6 +30,9 @@ echo "==> Instalando binário em /usr/lib/vega/vega-web"
 sudo install -Dm755 "$repo_root/target/release/vega-web" /usr/lib/vega/vega-web
 sudo install -Dm755 "$repo_root/target/release/vega-web-terminal-helper" \
   /usr/lib/vega/vega-web-terminal-helper
+sudo install -Dm755 "$repo_root/target/release/vega-web-auth-helper" \
+  /usr/lib/vega/vega-web-auth-helper
+sudo install -Dm755 "$packaging_dir/migrate-auth.sh" /usr/lib/vega/vega-web-migrate-auth
 
 echo "==> Units systemd"
 sudo install -Dm644 "$packaging_dir/vega-web.service" /usr/lib/systemd/system/vega-web.service
@@ -37,7 +40,11 @@ sudo install -Dm644 "$packaging_dir/vega-web-terminal.socket" \
   /usr/lib/systemd/system/vega-web-terminal.socket
 sudo install -Dm644 "$packaging_dir/vega-web-terminal@.service" \
   /usr/lib/systemd/system/vega-web-terminal@.service
-sudo systemctl daemon-reload
+sudo install -Dm644 "$packaging_dir/vega-web-auth.socket" \
+  /usr/lib/systemd/system/vega-web-auth.socket
+sudo install -Dm644 "$packaging_dir/vega-web-auth@.service" \
+  /usr/lib/systemd/system/vega-web-auth@.service
+sudo /usr/lib/vega/vega-web-migrate-auth
 sudo systemctl enable --now vega-web.service
 
 echo "==> Pronto. Status:"
