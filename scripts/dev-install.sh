@@ -32,6 +32,10 @@ sudo install -Dm755 "$repo_root/target/release/vega-web-terminal-helper" \
   /usr/lib/vega/vega-web-terminal-helper
 sudo install -Dm755 "$repo_root/target/release/vega-web-auth-helper" \
   /usr/lib/vega/vega-web-auth-helper
+sudo install -Dm755 "$repo_root/target/release/vega-web-admin-helper" \
+  /usr/lib/vega/vega-web-admin-helper
+sudo install -Dm644 "$packaging_dir/50-vega-web-admin.rules" \
+  /usr/share/polkit-1/rules.d/50-vega-web-admin.rules
 sudo install -Dm755 "$packaging_dir/migrate-auth.sh" /usr/lib/vega/vega-web-migrate-auth
 
 echo "==> Units systemd"
@@ -44,6 +48,10 @@ sudo install -Dm644 "$packaging_dir/vega-web-auth.socket" \
   /usr/lib/systemd/system/vega-web-auth.socket
 sudo install -Dm644 "$packaging_dir/vega-web-auth@.service" \
   /usr/lib/systemd/system/vega-web-auth@.service
+sudo install -Dm644 "$packaging_dir/vega-web-admin.socket" \
+  /usr/lib/systemd/system/vega-web-admin.socket
+sudo install -Dm644 "$packaging_dir/vega-web-admin@.service" \
+  /usr/lib/systemd/system/vega-web-admin@.service
 sudo /usr/lib/vega/vega-web-migrate-auth
 sudo systemctl enable --now vega-web.service
 

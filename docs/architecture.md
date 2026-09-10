@@ -1,9 +1,8 @@
 # Arquitetura do vega-web
 
-Status: painel de administração e terminal web implementados. As páginas de
-configuração continuam somente-leitura; instalação e alteração do firewall
-estão indisponíveis até existir autorização por usuário. O terminal é uma
-fronteira separada, restrita a administradores.
+Status: consultas, terminal e broker administrativo implementados. Instalação
+de RPM e abertura de porta usam reautenticação e execução com UID real,
+limitadas a administradores de `wheel`. O terminal é uma fronteira separada.
 
 ## Objetivo e limites
 
@@ -142,15 +141,20 @@ namespace; seu filho remove root para o UID autenticado antes do `exec`.
 Isso permite que o shell tenha semântica equivalente a uma sessão SSH sem
 afrouxar o processo HTTPS exposto à rede.
 
-## Fase 2 — demais ações privilegiadas (ainda não implementada)
+## Ações administrativas com identidade própria
 
 As chamadas de instalação e firewall pelo UID compartilhado do serviço foram
-retiradas. Os POST antigos falham com HTTP 403 sem acionar o daemon, e os
-controles indisponíveis não são oferecidos nas páginas.
+retiradas. Os POST antigos falham com HTTP 403 sem acionar o daemon.
 
-O desenho futuro exige autenticação vinculada a uma concessão revogável,
-broker separado e conexão D-Bus aberta pelo UID real. Também precisa resolver
-e validar o contexto remoto de PAM/Polkit: a política atual do `vegad` nega
-`allow_any` e `allow_inactive`, então UID correto e agente de autenticação
-sozinhos não garantem autorização. O contrato, a auditoria e os critérios de
-habilitação estão em [web-authorization.md](web-authorization.md).
+`/administracao` usa um token CSRF da sessão e uma nova senha. O broker root
+valida PAM, conta e grupo, emite uma concessão curta de uso único e executa
+uma operação tipada depois do commit. Um worker abre o D-Bus com UID/GID e
+grupos reais. O root registra um agente Polkit para esse filho, limitado à
+identidade autenticada e a uma ação, e o remove ao terminar.
+
+Como a política original nega o contexto remoto, uma regra explícita oferece
+um desafio de autenticação a `wheel` para instalação/firewall. Ela nunca
+autoriza automaticamente ou libera o UID do HTTPS. Nenhuma sessão local
+ativa é simulada. Logout e expiração invalidam pedidos ainda não consumidos;
+transações aceitas podem continuar no daemon. Contrato, escopo da política,
+auditoria e ensaios estão em [web-authorization.md](web-authorization.md).

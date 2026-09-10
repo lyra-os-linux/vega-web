@@ -6,9 +6,11 @@ fn main() {
     ]
     .into_iter()
     .find(|path| std::path::Path::new(path).exists());
-    if let Some(path) = runtime_only {
-        println!("cargo:rustc-link-arg-bin=vega-web-auth-helper={path}");
-    } else {
-        println!("cargo:rustc-link-arg-bin=vega-web-auth-helper=-lpam");
+    for binary in ["vega-web-auth-helper", "vega-web-admin-helper"] {
+        if let Some(path) = runtime_only {
+            println!("cargo:rustc-link-arg-bin={binary}={path}");
+        } else {
+            println!("cargo:rustc-link-arg-bin={binary}=-lpam");
+        }
     }
 }

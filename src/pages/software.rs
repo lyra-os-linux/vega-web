@@ -21,7 +21,7 @@ pub async fn handler(
     Query(query): Query<SearchQuery>,
 ) -> Html<String> {
     let client = state.dbus.software();
-    let mut body = super::ADMINISTRATION_UNAVAILABLE_NOTICE.to_string();
+    let mut body = super::admin::notice(&state);
 
     match client.package_manager_name().await {
         Ok(name) => body.push_str(&format!(

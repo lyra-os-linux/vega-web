@@ -54,6 +54,7 @@ unsafe extern "C" {
     fn pam_end(pamh: *mut PamHandle, pam_status: c_int) -> c_int;
     fn pam_authenticate(pamh: *mut PamHandle, flags: c_int) -> c_int;
     fn pam_acct_mgmt(pamh: *mut PamHandle, flags: c_int) -> c_int;
+    fn pam_get_item(pamh: *const PamHandle, item_type: c_int, item: *mut *const c_void) -> c_int;
     fn pam_strerror(pamh: *mut PamHandle, errnum: c_int) -> *const c_char;
 }
 
@@ -137,60 +138,91 @@ impl std::fmt::Display for AuthError {
 
 impl std::error::Error for AuthError {}
 
-/// Autentica `username`/`password` contra o serviço PAM informado
-/// (ver `/etc/pam.d/<service>`), checando também se a conta está válida
-/// (não expirada/bloqueada). Não abre sessão PAM: o vega-web só usa isto
-/// como portão de login, não para assumir a identidade do usuário no
-/// sistema (isso é trabalho da Fase 2, feito por um helper separado).
-pub fn authenticate(service: &str, username: &str, password: &str) -> Result<(), AuthError> {
-    let service = CString::new(service).map_err(|_| AuthError("serviço PAM inválido".into()))?;
-    let user = CString::new(username).map_err(|_| AuthError("nome de usuário inválido".into()))?;
-    let data = Box::new(ConvData {
-        username: user.clone(),
-        password: Zeroizing::new(
-            CString::new(password).map_err(|_| AuthError("senha inválida".into()))?,
-        ),
-    });
-    let data_ptr = Box::into_raw(data);
+/// A PAM handle scoped to one authentication/operation. The conversation data
+/// outlives pam_end, including on an early return from a failed account check.
+pub struct AuthenticatedAccount {
+    handle: *mut PamHandle,
+    data: Box<ConvData>,
+    status: c_int,
+}
 
-    let conv = PamConv {
-        conv: Some(conversation),
-        appdata_ptr: data_ptr as *mut c_void,
-    };
-
-    let mut handle: *mut PamHandle = ptr::null_mut();
-    let start_rc = unsafe { pam_start(service.as_ptr(), user.as_ptr(), &conv, &mut handle) };
-
-    // Sempre reconstitui a Box para desalocar, mesmo em caminhos de erro.
-    let _owned_data = unsafe { Box::from_raw(data_ptr) };
-
-    if start_rc != PAM_SUCCESS || handle.is_null() {
-        return Err(AuthError(format!("pam_start falhou (código {start_rc})")));
-    }
-
-    let auth_rc = unsafe { pam_authenticate(handle, PAM_SILENT | PAM_DISALLOW_NULL_AUTHTOK) };
-    let acct_rc = if auth_rc == PAM_SUCCESS {
-        unsafe { pam_acct_mgmt(handle, PAM_SILENT | PAM_DISALLOW_NULL_AUTHTOK) }
-    } else {
-        auth_rc
-    };
-
-    let result = if auth_rc == PAM_SUCCESS && acct_rc == PAM_SUCCESS {
-        Ok(())
-    } else {
-        let failing_rc = if auth_rc != PAM_SUCCESS {
-            auth_rc
-        } else {
-            acct_rc
+impl AuthenticatedAccount {
+    pub fn authenticate(service: &str, username: &str, password: &str) -> Result<Self, AuthError> {
+        let service = CString::new(service).map_err(|_| AuthError("invalid PAM service".into()))?;
+        let data = Box::new(ConvData {
+            username: CString::new(username).map_err(|_| AuthError("invalid username".into()))?,
+            password: Zeroizing::new(
+                CString::new(password).map_err(|_| AuthError("invalid password".into()))?,
+            ),
+        });
+        let conversation = PamConv {
+            conv: Some(conversation),
+            appdata_ptr: (&*data as *const ConvData).cast_mut().cast(),
         };
-        Err(AuthError(pam_error_message(handle, failing_rc)))
-    };
-
-    unsafe {
-        pam_end(handle, acct_rc);
+        let mut handle = ptr::null_mut();
+        let status = unsafe {
+            pam_start(
+                service.as_ptr(),
+                data.username.as_ptr(),
+                &conversation,
+                &mut handle,
+            )
+        };
+        if status != PAM_SUCCESS || handle.is_null() {
+            if !handle.is_null() {
+                unsafe {
+                    pam_end(handle, status);
+                }
+            }
+            return Err(AuthError(format!("pam_start failed ({status})")));
+        }
+        let mut account = Self {
+            handle,
+            data,
+            status,
+        };
+        account.status =
+            unsafe { pam_authenticate(handle, PAM_SILENT | PAM_DISALLOW_NULL_AUTHTOK) };
+        if account.status != PAM_SUCCESS {
+            return Err(AuthError(pam_error_message(handle, account.status)));
+        }
+        account.check_account()?;
+        Ok(account)
     }
 
-    result
+    /// Recheck expiry/policy immediately before consuming administrative work.
+    /// A PAM stack remapping the requested identity is refused explicitly.
+    pub fn check_account(&mut self) -> Result<(), AuthError> {
+        self.status = unsafe { pam_acct_mgmt(self.handle, PAM_SILENT | PAM_DISALLOW_NULL_AUTHTOK) };
+        if self.status != PAM_SUCCESS {
+            return Err(AuthError(pam_error_message(self.handle, self.status)));
+        }
+        let mut user: *const c_void = ptr::null();
+        const PAM_USER: c_int = 2;
+        self.status = unsafe { pam_get_item(self.handle, PAM_USER, &mut user) };
+        if self.status != PAM_SUCCESS
+            || user.is_null()
+            || unsafe { CStr::from_ptr(user.cast()) } != self.data.username.as_c_str()
+        {
+            return Err(AuthError("PAM identity changed".into()));
+        }
+        Ok(())
+    }
+}
+
+impl Drop for AuthenticatedAccount {
+    fn drop(&mut self) {
+        unsafe {
+            pam_end(self.handle, self.status);
+        }
+    }
+}
+
+/// The login helper needs only the result; the administration helper retains
+/// the bounded handle to recheck the account before a committed operation.
+#[allow(dead_code)] // The shared module is also compiled by the admin binary.
+pub fn authenticate(service: &str, username: &str, password: &str) -> Result<(), AuthError> {
+    AuthenticatedAccount::authenticate(service, username, password).map(drop)
 }
 
 fn pam_error_message(handle: *mut PamHandle, code: c_int) -> String {

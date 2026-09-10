@@ -149,6 +149,7 @@ async fn authorization_integration_rejects_writes_without_calling_daemon() {
         terminal_grants: TerminalGrants::default(),
         terminal_slots: Arc::new(Semaphore::new(1)),
         terminal_socket: "/unused-test-terminal.sock".into(),
+        admin_socket: None,
     };
     let router = build_router(state);
     let tcp = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -211,5 +212,146 @@ async fn authorization_integration_rejects_writes_without_calling_daemon() {
     }
     assert_eq!(writes.load(Ordering::SeqCst), 0);
     eprintln!("PASS: no HTTP request invoked Software.Install or Firewall.AddPort");
+    server.abort();
+}
+
+#[tokio::test]
+#[ignore = "requires a private D-Bus: bash scripts/check-authorization-contracts.sh"]
+async fn authorization_integration_admin_frontdoor_rejects_forgery_before_broker() {
+    assert_eq!(
+        std::env::var("VEGA_WEB_TEST_PRIVATE_BUS").as_deref(),
+        Ok("1")
+    );
+    assert_eq!(
+        std::env::var("DBUS_SYSTEM_BUS_ADDRESS").unwrap(),
+        std::env::var("DBUS_SESSION_BUS_ADDRESS").unwrap()
+    );
+    let temp = tempfile::tempdir().unwrap();
+    let path = temp.path().join("broker.sock");
+    let broker = tokio::net::UnixListener::bind(&path).unwrap();
+    let key = Key::generate();
+    let sessions = SessionStore::new(SessionPolicy::default());
+    for name in ["alice", "bob"] {
+        sessions.insert(
+            name.into(),
+            state::Session::new(name.into(), Instant::now()),
+        );
+    }
+    let alice = sessions.lease("alice", Instant::now()).unwrap();
+    let bob = sessions.lease("bob", Instant::now()).unwrap();
+    assert_ne!(alice.csrf, bob.csrf);
+    assert_ne!(alice.admin_binding, bob.admin_binding);
+    let state = AppState {
+        dbus: lyra_vega_dbus::VegaDbus::connect().await.unwrap(),
+        sessions: sessions.clone(),
+        cookie_key: key.clone(),
+        authenticator: Arc::new(UnusedAuthenticator),
+        login_limiter: LoginLimiter::new(LoginPolicy::default()),
+        pam_slots: Arc::new(Semaphore::new(1)),
+        terminal_grants: TerminalGrants::default(),
+        terminal_slots: Arc::new(Semaphore::new(1)),
+        terminal_socket: "/unused".into(),
+        admin_socket: Some(path.to_str().unwrap().into()),
+    };
+    let router = build_router(state);
+    let tcp = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = tcp.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        axum::serve(
+            tcp,
+            router.into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .await
+        .unwrap();
+    });
+    let cookie = cookie_header(&key, "alice");
+    let response = request(address, "GET", "/administracao", &cookie, "").await;
+    assert!(response.starts_with("HTTP/1.1 200"), "{response}");
+    assert!(response.contains(&alice.csrf));
+    assert!(response.contains("autocomplete=\"current-password\""));
+    let binding_hex: String = alice
+        .admin_binding
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    assert!(!response.contains(&binding_hex));
+    for (status, body) in [
+        (
+            403,
+            "action=install&csrf=forged&package=test&password=secret".to_string(),
+        ),
+        (
+            403,
+            format!(
+                "action=install&csrf={}&package=test&password=secret",
+                bob.csrf
+            ),
+        ),
+        (
+            400,
+            format!(
+                "action=install&csrf={}&package=--force&password=secret",
+                alice.csrf
+            ),
+        ),
+        (
+            400,
+            format!(
+                "action=add-port&csrf={}&port=0&protocol=tcp&password=secret",
+                alice.csrf
+            ),
+        ),
+        (
+            400,
+            format!(
+                "action=install&csrf={}&package=test&port=22&protocol=tcp&password=secret",
+                alice.csrf
+            ),
+        ),
+        (
+            400,
+            format!("action=install&csrf={}&package=test&password=", alice.csrf),
+        ),
+    ] {
+        let response = request(address, "POST", "/administracao", &cookie, &body).await;
+        assert!(
+            response.starts_with(&format!("HTTP/1.1 {status}")),
+            "{response}"
+        );
+        assert!(!response.contains("secret"));
+    }
+    for identity in [
+        "username=root",
+        "uid=0",
+        "session=other",
+        "operation=remove",
+    ] {
+        let body = format!(
+            "action=install&csrf={}&package=test&password=secret&{identity}",
+            alice.csrf
+        );
+        let response = request(address, "POST", "/administracao", &cookie, &body).await;
+        assert!(response.starts_with("HTTP/1.1 422"), "{response}");
+        assert!(!response.contains("secret"));
+    }
+    let large = "password=".to_string() + &"x".repeat(9000);
+    assert!(
+        request(address, "POST", "/administracao", &cookie, &large)
+            .await
+            .starts_with("HTTP/1.1 413")
+    );
+    sessions.remove("alice");
+    let body = format!(
+        "action=install&csrf={}&package=test&password=secret",
+        alice.csrf
+    );
+    let response = request(address, "POST", "/administracao", &cookie, &body).await;
+    assert!(response.starts_with("HTTP/1.1 303"), "{response}");
+    assert!(
+        tokio::time::timeout(Duration::from_millis(50), broker.accept())
+            .await
+            .is_err(),
+        "a rejected request reached the administrative broker"
+    );
     server.abort();
 }

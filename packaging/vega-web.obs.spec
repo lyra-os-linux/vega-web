@@ -32,6 +32,7 @@ BuildRequires:  pam-devel
 BuildRequires:  sysuser-tools
 Requires:       vegad
 Requires:       pam
+Requires:       polkit
 Requires(pre):    sysuser-tools
 Requires(post):   systemd
 Requires(post):   shadow
@@ -66,6 +67,14 @@ install -Dm755 target/release/vega-web-terminal-helper \
   %{buildroot}%{_prefix}/lib/vega/vega-web-terminal-helper
 install -Dm755 target/release/vega-web-auth-helper \
   %{buildroot}%{_prefix}/lib/vega/vega-web-auth-helper
+install -Dm755 target/release/vega-web-admin-helper \
+  %{buildroot}%{_prefix}/lib/vega/vega-web-admin-helper
+install -Dm644 packaging/vega-web-admin.socket \
+  %{buildroot}%{_prefix}/lib/systemd/system/vega-web-admin.socket
+install -Dm644 packaging/vega-web-admin@.service \
+  %{buildroot}%{_prefix}/lib/systemd/system/vega-web-admin@.service
+install -Dm644 packaging/50-vega-web-admin.rules \
+  %{buildroot}%{_datadir}/polkit-1/rules.d/50-vega-web-admin.rules
 install -Dm755 packaging/migrate-auth.sh \
   %{buildroot}%{_prefix}/lib/vega/vega-web-migrate-auth
 install -Dm644 packaging/vega-web-auth.socket \
@@ -93,6 +102,10 @@ install -Dm644 packaging/pam.d/vega-web \
 %{_prefix}/lib/vega/vega-web
 %{_prefix}/lib/vega/vega-web-terminal-helper
 %{_prefix}/lib/vega/vega-web-auth-helper
+%{_prefix}/lib/vega/vega-web-admin-helper
+%{_prefix}/lib/systemd/system/vega-web-admin.socket
+%{_prefix}/lib/systemd/system/vega-web-admin@.service
+%{_datadir}/polkit-1/rules.d/50-vega-web-admin.rules
 %{_prefix}/lib/vega/vega-web-migrate-auth
 %{_prefix}/lib/systemd/system/vega-web-auth.socket
 %{_prefix}/lib/systemd/system/vega-web-auth@.service

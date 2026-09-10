@@ -68,6 +68,9 @@ async fn main() {
         terminal_grants: TerminalGrants::default(),
         terminal_slots: Arc::new(Semaphore::new(env_usize("VEGA_WEB_TERMINAL_LIMIT", 4))),
         terminal_socket: env_or("VEGA_WEB_TERMINAL_SOCKET", "/run/vega-web/terminal.sock"),
+        admin_socket: std::env::var("VEGA_WEB_ADMIN_SOCKET")
+            .ok()
+            .filter(|path| !path.is_empty()),
     };
 
     let tls_config = tls::ensure_self_signed(
@@ -89,6 +92,12 @@ async fn main() {
 
 fn build_router(state: AppState) -> Router {
     let protected = Router::new()
+        .route(
+            "/administracao",
+            get(pages::admin::handler)
+                .post(pages::admin::execute)
+                .layer(axum::extract::DefaultBodyLimit::max(8192)),
+        )
         .route("/", get(pages::dashboard::handler))
         .route(
             "/software",

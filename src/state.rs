@@ -5,6 +5,7 @@ use std::time::{Duration, Instant};
 use axum::extract::FromRef;
 use axum_extra::extract::cookie::Key;
 use lyra_vega_dbus::VegaDbus;
+use rand::RngExt;
 use tokio::sync::{Semaphore, watch};
 
 use crate::auth::Authenticator;
@@ -53,6 +54,8 @@ impl Default for SessionPolicy {
 
 pub struct Session {
     pub username: String,
+    csrf: String,
+    admin_binding: [u8; 32],
     created_at: Instant,
     last_seen: Instant,
     expires: watch::Sender<Instant>,
@@ -60,8 +63,14 @@ pub struct Session {
 
 impl Session {
     pub fn new(username: String, now: Instant) -> Self {
+        let mut csrf = [0u8; 32];
+        let mut admin_binding = [0u8; 32];
+        rand::rng().fill(&mut csrf);
+        rand::rng().fill(&mut admin_binding);
         Self {
             username,
+            csrf: csrf.iter().map(|byte| format!("{byte:02x}")).collect(),
+            admin_binding,
             created_at: now,
             last_seen: now,
             expires: watch::channel(now).0,
@@ -85,6 +94,8 @@ impl Session {
 /// every subscriber, including one waiting for a slow socket write.
 pub struct SessionLease {
     pub username: String,
+    pub csrf: String,
+    pub admin_binding: [u8; 32],
     expires: watch::Receiver<Instant>,
 }
 
@@ -156,6 +167,8 @@ impl SessionStore {
         let session = store.values.get(token)?;
         Some(SessionLease {
             username: session.username.clone(),
+            csrf: session.csrf.clone(),
+            admin_binding: session.admin_binding,
             expires: session.expires.subscribe(),
         })
     }
@@ -294,6 +307,7 @@ pub struct AppState {
     pub terminal_grants: TerminalGrants,
     pub terminal_slots: Arc<Semaphore>,
     pub terminal_socket: String,
+    pub admin_socket: Option<String>,
 }
 
 impl FromRef<AppState> for Key {

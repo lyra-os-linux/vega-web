@@ -1,0 +1,13 @@
+// Permit a fresh authentication challenge for these two actions to members of
+// the same administrator group required by the web broker. This never grants
+// an action without authentication or retains an authorization. Local policies
+// loaded earlier may still deny it. The HTTPS account is never eligible.
+polkit.addRule(function(action, subject) {
+    if (action.id !== "org.lyraos.vega.software.install" &&
+        action.id !== "org.lyraos.vega.firewall.configure")
+        return;
+    if (subject.user === "vega-web")
+        return polkit.Result.NO;
+    if (subject.user !== "root" && subject.isInGroup("wheel"))
+        return polkit.Result.AUTH_SELF;
+});
