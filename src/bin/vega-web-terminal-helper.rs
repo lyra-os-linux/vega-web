@@ -55,24 +55,114 @@ fn run() -> Result<(), String> {
         child_exec(&target);
     }
 
-    // O broker pai só encaminha bytes; abandona root imediatamente.
-    if unsafe { libc::setgroups(1, &caller.gid) } != 0
-        || unsafe { libc::setgid(caller.gid) } != 0
-        || unsafe { libc::setuid(caller.uid) } != 0
-    {
-        unsafe { libc::kill(pid, libc::SIGKILL) };
-        return Err(format!(
-            "não foi possível remover privilégios do broker: {}",
-            io::Error::last_os_error()
-        ));
+    // Only the byte-forwarding child parses terminal frames, as vega-web.
+    // A small root supervisor must remain able to signal the other user's
+    // shell. It only observes disconnects, child exits and wheel membership.
+    let broker = unsafe { libc::fork() };
+    if broker == 0 {
+        if unsafe { libc::setgroups(1, &caller.gid) } != 0
+            || unsafe { libc::setgid(caller.gid) } != 0
+            || unsafe { libc::setuid(caller.uid) } != 0
+        {
+            unsafe { libc::_exit(126) };
+        }
+        let result = bridge(master);
+        unsafe { libc::_exit(if result.is_ok() { 0 } else { 1 }) };
     }
-    let result = bridge(master);
     unsafe {
         libc::close(master);
-        libc::kill(-pid, libc::SIGHUP);
-        libc::waitpid(pid, ptr::null_mut(), 0);
+        libc::close(1);
     }
-    result.map_err(|error| format!("sessão PTY: {error}"))
+    let result = if broker < 0 {
+        Err("não foi possível iniciar o encaminhador PTY".into())
+    } else {
+        supervise(pid, broker, &target)
+    };
+    if broker > 0 {
+        unsafe { libc::kill(broker, libc::SIGKILL) };
+    }
+    terminate_shell(pid);
+    if broker > 0 {
+        reap(broker);
+    }
+    result
+}
+
+fn supervise(shell: libc::pid_t, broker: libc::pid_t, target: &Account) -> Result<(), String> {
+    let mut next_check = std::time::Instant::now();
+    loop {
+        if child_exited(shell)? || child_exited(broker)? {
+            return Ok(());
+        }
+        if std::time::Instant::now() >= next_check {
+            let name = target.name.to_str().map_err(|_| "identidade inválida")?;
+            let current = account(name)?;
+            if current.uid != target.uid || current.uid == 0 || !is_wheel_member(&current)? {
+                return Err("privilégio do terminal revogado".into());
+            }
+            next_check = std::time::Instant::now() + std::time::Duration::from_secs(1);
+        }
+        let mut peer = libc::pollfd {
+            fd: 0,
+            events: libc::POLLRDHUP,
+            revents: 0,
+        };
+        // Observing hangup does not consume frames. This also cancels a
+        // broker blocked writing to a PTY whose shell is no longer reading.
+        if unsafe { libc::poll(&mut peer, 1, 100) } < 0 {
+            let error = io::Error::last_os_error();
+            if error.kind() == io::ErrorKind::Interrupted {
+                continue;
+            }
+            return Err(format!("supervisão PTY: {error}"));
+        }
+        if peer.revents & (libc::POLLRDHUP | libc::POLLHUP | libc::POLLERR | libc::POLLNVAL) != 0 {
+            return Ok(());
+        }
+    }
+}
+
+fn child_exited(pid: libc::pid_t) -> Result<bool, String> {
+    let mut info: libc::siginfo_t = unsafe { std::mem::zeroed() };
+    if unsafe {
+        libc::waitid(
+            libc::P_PID,
+            pid as _,
+            &mut info,
+            libc::WEXITED | libc::WNOHANG | libc::WNOWAIT,
+        )
+    } < 0
+    {
+        return Err(format!("waitid: {}", io::Error::last_os_error()));
+    }
+    // Do not reap before signalling: keeping the child prevents PID reuse.
+    Ok(unsafe { info.si_pid() } != 0)
+}
+
+fn terminate_shell(pid: libc::pid_t) {
+    unsafe {
+        libc::kill(-pid, libc::SIGHUP);
+        libc::kill(pid, libc::SIGHUP);
+    }
+    let until = std::time::Instant::now() + std::time::Duration::from_millis(500);
+    while std::time::Instant::now() < until && matches!(child_exited(pid), Ok(false)) {
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    unsafe {
+        libc::kill(-pid, libc::SIGKILL);
+        libc::kill(pid, libc::SIGKILL);
+    }
+    reap(pid);
+    // KillMode=control-group also cleans up descendants which started a
+    // separate process group/session when the supervisor exits.
+}
+
+fn reap(pid: libc::pid_t) {
+    while unsafe { libc::waitpid(pid, ptr::null_mut(), 0) } < 0 {
+        if io::Error::last_os_error().kind() != io::ErrorKind::Interrupted {
+            break;
+        }
+    }
 }
 
 fn parse_mode() -> Result<(), String> {

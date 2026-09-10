@@ -1947,6 +1947,7 @@ dependencies = [
  "axum",
  "axum-extra",
  "axum-server",
+ "futures-util",
  "gettext-rs",
  "libc",
  "lyra-vega-dbus",
@@ -1954,8 +1955,10 @@ dependencies = [
  "rcgen",
  "rustls",
  "serde",
+ "tempfile",
  "time",
  "tokio",
+ "tokio-tungstenite",
 ]
 
 [[package]]
