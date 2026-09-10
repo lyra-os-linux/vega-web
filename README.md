@@ -6,6 +6,10 @@ sistema); sem certificado público — ver [`docs/privacidade.md`](docs/privacid
 antes de expor além da LAN. Inclui um terminal web completo, com
 reautenticação, limitado a administradores do grupo `wheel`.
 
+Software e Rede/Firewall permitem consultas. Instalação de pacotes e criação
+de regras pelo painel aguardam autorização por usuário; use o Vega na sessão
+local para essas ações. Ver [autorização web](docs/web-authorization.md).
+
 Um quarto frontend do Vega, ao lado de
 [`vega-gtk`](https://github.com/lyra-os-linux/vega) e
 [`vega-cli`](https://github.com/lyra-os-linux/vega-cli): não duplica lógica

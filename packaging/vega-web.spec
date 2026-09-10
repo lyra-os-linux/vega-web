@@ -62,6 +62,7 @@ install -Dm644 packaging/pam.d/vega-web \
 
 %files
 %doc docs/terminal-sessions.md
+%doc docs/web-authorization.md
 %dir %{_prefix}/lib/vega
 %{_prefix}/lib/vega/vega-web
 %{_prefix}/lib/vega/vega-web-terminal-helper

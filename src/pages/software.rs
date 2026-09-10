@@ -1,6 +1,5 @@
-use axum::Form;
 use axum::extract::{Extension, Query, State};
-use axum::response::{Html, Redirect};
+use axum::response::Html;
 use lyra_vega_dbus::SoftwareClient;
 use serde::Deserialize;
 
@@ -14,15 +13,6 @@ use super::{error_body, html_escape, render};
 pub struct SearchQuery {
     #[serde(default)]
     q: String,
-    #[serde(default)]
-    install: String,
-    #[serde(default)]
-    tx: Option<u32>,
-}
-
-#[derive(Deserialize)]
-pub struct InstallForm {
-    package: String,
 }
 
 pub async fn handler(
@@ -31,19 +21,7 @@ pub async fn handler(
     Query(query): Query<SearchQuery>,
 ) -> Html<String> {
     let client = state.dbus.software();
-    let mut body = String::new();
-
-    match query.install.as_str() {
-        "started" => body.push_str(&format!(
-            r#"<p class="notice success">Instalação iniciada pelo Zypper (transação #{}). Ela continuará em segundo plano.</p>"#,
-            query.tx.unwrap_or_default()
-        )),
-        "invalid" => body.push_str(
-            r#"<p class="error" role="alert">O identificador do pacote é inválido.</p>"#,
-        ),
-        "error" => body.push_str(r#"<p class="error" role="alert">Não foi possível iniciar a instalação. Verifique a autorização e tente novamente.</p>"#),
-        _ => {}
-    }
+    let mut body = super::ADMINISTRATION_UNAVAILABLE_NOTICE.to_string();
 
     match client.package_manager_name().await {
         Ok(name) => body.push_str(&format!(
@@ -109,16 +87,13 @@ fn package_table(title: &str, packages: &[lyra_vega_dbus::PackageRef]) -> String
     let rows: String = packages
         .iter()
         .map(|package| {
-            let action = if package.installed {
-                r#"<span class="badge on">instalado</span>"#.to_string()
+            let status = if package.installed {
+                r#"<span class="badge on">instalado</span>"#
             } else {
-                format!(
-                    r#"<form class="row-action-form" method="post" action="/software"><input type="hidden" name="package" value="{}"><button type="submit">Instalar</button></form>"#,
-                    html_escape(&package.id)
-                )
+                r#"<span class="badge">disponível</span>"#
             };
             format!(
-                "<tr><td>{}<br><small>{}</small></td><td>{}</td><td>{}</td><td>{action}</td></tr>",
+                "<tr><td>{}<br><small>{}</small></td><td>{}</td><td>{}</td><td>{status}</td></tr>",
                 html_escape(&package.name),
                 html_escape(&package.description),
                 "Zypper",
@@ -128,52 +103,6 @@ fn package_table(title: &str, packages: &[lyra_vega_dbus::PackageRef]) -> String
         .collect();
     format!(
         r#"<h3>{title}</h3>
-<table><thead><tr><th>Pacote</th><th>Origem</th><th>Repositório</th><th>Ação</th></tr></thead><tbody>{rows}</tbody></table>"#
+<table><thead><tr><th>Pacote</th><th>Origem</th><th>Repositório</th><th>Estado</th></tr></thead><tbody>{rows}</tbody></table>"#
     )
-}
-
-pub async fn install_native(
-    State(state): State<AppState>,
-    Extension(_user): Extension<CurrentUser>,
-    Form(form): Form<InstallForm>,
-) -> Redirect {
-    let package = form.package.trim();
-    if !valid_native_package_id(package) {
-        return Redirect::to("/software?install=invalid");
-    }
-
-    // The web frontend deliberately supports the native backend only. Never
-    // accept an origin from the request: forcing `official` keeps Flatpak and
-    // any future provider outside this surface.
-    match state.dbus.software().install("official", package).await {
-        Ok(transaction_id) => {
-            Redirect::to(&format!("/software?install=started&tx={transaction_id}"))
-        }
-        Err(error) => {
-            eprintln!("vega-web: falha ao instalar pacote Zypper {package}: {error}");
-            Redirect::to("/software?install=error")
-        }
-    }
-}
-
-fn valid_native_package_id(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= 255
-        && value
-            .bytes()
-            .all(|byte| byte.is_ascii_alphanumeric() || b"-+._:".contains(&byte))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::valid_native_package_id;
-
-    #[test]
-    fn native_package_ids_reject_request_manipulation() {
-        assert!(valid_native_package_id("patterns-base-base"));
-        assert!(valid_native_package_id("libQt6Core6-6.8.2"));
-        assert!(!valid_native_package_id(""));
-        assert!(!valid_native_package_id("pkg --root /tmp"));
-        assert!(!valid_native_package_id("pkg/../../etc"));
-    }
 }

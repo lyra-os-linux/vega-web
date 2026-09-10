@@ -1,8 +1,6 @@
-use axum::Form;
-use axum::extract::{Extension, Query, State};
-use axum::response::{Html, Redirect};
+use axum::extract::{Extension, State};
+use axum::response::Html;
 use lyra_vega_dbus::{FirewallClient, NetworkClient};
-use serde::Deserialize;
 
 use crate::auth::CurrentUser;
 use crate::state::AppState;
@@ -10,30 +8,11 @@ use crate::state::AppState;
 use super::widgets::{bar, icon_stat};
 use super::{error_body, html_escape, render};
 
-#[derive(Default, Deserialize)]
-pub struct NetworkQuery {
-    #[serde(default)]
-    firewall: String,
-}
-
-#[derive(Deserialize)]
-pub struct FirewallRuleForm {
-    port: String,
-    protocol: String,
-}
-
 pub async fn handler(
     State(state): State<AppState>,
     Extension(user): Extension<CurrentUser>,
-    Query(query): Query<NetworkQuery>,
 ) -> Html<String> {
-    let mut body = String::new();
-    match query.firewall.as_str() {
-        "added" => body.push_str(r#"<p class="notice success">Regra adicionada e firewall recarregado.</p>"#),
-        "invalid" => body.push_str(r#"<p class="error" role="alert">Informe uma porta entre 1 e 65535 ou um intervalo válido.</p>"#),
-        "error" => body.push_str(r#"<p class="error" role="alert">Não foi possível adicionar a regra. Verifique a autorização e tente novamente.</p>"#),
-        _ => {}
-    }
+    let mut body = super::ADMINISTRATION_UNAVAILABLE_NOTICE.to_string();
     let net = state.dbus.network();
 
     match net.interfaces().await {
@@ -167,11 +146,6 @@ pub async fn handler(
                 .collect();
             body.push_str(&format!(
                 r#"<h3>Regras de porta personalizadas</h3>
-<form class="inline-form" method="post" action="/rede">
-<label for="firewall-port">Porta ou intervalo<input id="firewall-port" name="port" inputmode="numeric" placeholder="Ex.: 8080 ou 9000-9010" required></label>
-<label for="firewall-protocol">Protocolo<select id="firewall-protocol" name="protocol"><option value="tcp">TCP</option><option value="udp">UDP</option></select></label>
-<button type="submit">Adicionar regra</button>
-</form>
 <table><thead><tr><th>Porta</th><th>Protocolo</th></tr></thead><tbody>{rows}</tbody></table>"#
             ));
         }
@@ -179,51 +153,4 @@ pub async fn handler(
     }
 
     render("Rede e Firewall", "/rede", &user.0, body)
-}
-
-pub async fn add_firewall_rule(
-    State(state): State<AppState>,
-    Extension(_user): Extension<CurrentUser>,
-    Form(form): Form<FirewallRuleForm>,
-) -> Redirect {
-    let port = form.port.trim();
-    let protocol = form.protocol.trim().to_ascii_lowercase();
-    if !valid_port_or_range(port) || !matches!(protocol.as_str(), "tcp" | "udp") {
-        return Redirect::to("/rede?firewall=invalid");
-    }
-
-    match state.dbus.firewall().add_port(port, &protocol).await {
-        Ok(()) => Redirect::to("/rede?firewall=added"),
-        Err(error) => {
-            eprintln!("vega-web: falha ao adicionar regra de firewall: {error}");
-            Redirect::to("/rede?firewall=error")
-        }
-    }
-}
-
-fn valid_port_or_range(value: &str) -> bool {
-    let valid = |part: &str| part.parse::<u16>().is_ok_and(|port| port > 0);
-    match value.split_once('-') {
-        Some((start, end)) => {
-            valid(start)
-                && valid(end)
-                && start.parse::<u16>().expect("porta inicial já validada")
-                    <= end.parse::<u16>().expect("porta final já validada")
-        }
-        None => valid(value),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::valid_port_or_range;
-
-    #[test]
-    fn firewall_port_validation_accepts_ports_and_ordered_ranges() {
-        assert!(valid_port_or_range("443"));
-        assert!(valid_port_or_range("8000-8010"));
-        assert!(!valid_port_or_range("0"));
-        assert!(!valid_port_or_range("9000-8000"));
-        assert!(!valid_port_or_range("22/tcp"));
-    }
 }

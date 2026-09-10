@@ -28,6 +28,8 @@ jobs:
           cargo clippy --locked --all-targets --all-features -- -D warnings
       - name: Verify logout and expiry with live HTTP and WebSocket connections
         run: bash scripts/check-session-contracts.sh
+      - name: Reject web mutations even when a fake daemon would allow them
+        run: bash scripts/check-authorization-contracts.sh
       - name: Qualify the real terminal helper in a disposable systemd VM
         run: |
           cargo build --locked --bin vega-web-terminal-helper
