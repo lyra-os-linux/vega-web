@@ -49,6 +49,7 @@ async fn main() {
         .expect("não foi possível conectar ao system bus (vegad precisa estar instalado)");
 
     let state = AppState {
+        nvidia_jobs: Default::default(),
         dbus,
         sessions: SessionStore::new(SessionPolicy {
             idle_timeout: Duration::from_secs(env_u64("VEGA_WEB_SESSION_IDLE_SECS", 1800)),
@@ -106,6 +107,11 @@ fn build_router(state: AppState) -> Router {
         .route("/backup", get(pages::backup::handler))
         .route("/snapshots", get(pages::snapshots::handler))
         .route("/hardware", get(pages::hardware::handler))
+        .route("/hardware/nvidia", get(pages::nvidia::handler))
+        .route(
+            "/hardware/nvidia/progress/{id}",
+            get(pages::nvidia::progress),
+        )
         .route("/armazenamento", get(pages::storage::handler))
         .route(
             "/rede",

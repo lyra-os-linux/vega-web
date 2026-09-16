@@ -52,7 +52,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           repository: lyra-os-linux/vegad
-          ref: 57f3e143ee22aa2ff2467ac4ef829667b1876a67
+          ref: 6daccd0b181777764e549373b2bdd06cd2189372
           path: target/vegad-contract-source
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
@@ -71,8 +71,7 @@ jobs:
             --policy target/vegad-contract-source/packaging/org.lyraos.vega.policy
       - name: Verify canonical D-Bus contract pin
         run: |
-          grep -F 'lyra-vega-dbus = { git = "https://github.com/lyra-os-linux/lyra-vega-dbus", tag = "v5.1.22" }' Cargo.toml
-          grep -F 'lyra-vega-dbus?tag=v5.1.22#' Cargo.lock
+          bash scripts/check-dbus-pin.sh
 
   packaging:
     runs-on: ubuntu-latest

@@ -595,7 +595,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -995,8 +995,10 @@ checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
 [[package]]
 name = "lyra-vega-dbus"
 version = "5.1.22"
-source = "git+https://github.com/lyra-os-linux/lyra-vega-dbus?tag=v5.1.22#ce8af8391acf25ca8a105fa8f81aacfac56f4486"
+source = "git+https://github.com/lyra-os-linux/lyra-vega-dbus?rev=5d559f9f1f95916a33befe23af6da6084012e000#5d559f9f1f95916a33befe23af6da6084012e000"
 dependencies = [
+ "async-io",
+ "async-lock",
  "async-trait",
  "futures-lite",
  "futures-util",
@@ -1432,7 +1434,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -1665,10 +1667,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.3",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix",
- "windows-sys 0.61.2",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -1942,7 +1944,7 @@ dependencies = [
 
 [[package]]
 name = "vega-web"
-version = "5.1.22"
+version = "5.1.23"
 dependencies = [
  "axum",
  "axum-extra",

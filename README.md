@@ -33,3 +33,17 @@ scripts/dev-uninstall.sh  # reverte
 ```
 
 Licenciado sob GPL-3.0.
+
+## Instalação NVIDIA opcional
+
+Em Hardware e Kernel → NVIDIA (`/hardware/nvidia`), consulte o driver e a recuperação sem privilégios. A instalação
+exige confirmação explícita e autorização administrativa. Conteúdo novo em
+PT/EN/ES; diagnósticos técnicos do backend preservam seus identificadores.
+No Web, a senha é revalidada pelo broker PAM/Polkit com o UID real do usuário;
+a página acompanha a transação e não confunde aceitação com conclusão.
+
+Requer `nvidia-official-v1` e `nvidia-recovery-v1` (vegad >= 5.1.29). Btrfs usa
+Snapper; Server/ext4 simples usa Restic e restauração exclusivamente offline.
+O backup deve ser criado e verificado antes do commit. Falha, perda do daemon,
+expiração ou interrupção da observação nunca dispara repetição automática.
+Veja [o contrato e a recuperação](https://github.com/lyra-os-linux/vegad/blob/main/docs/nvidia.md).

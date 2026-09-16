@@ -298,6 +298,7 @@ impl LoginLimiter {
 
 #[derive(Clone)]
 pub struct AppState {
+    pub nvidia_jobs: crate::pages::nvidia::Jobs,
     pub dbus: VegaDbus,
     pub sessions: SessionStore,
     pub cookie_key: Key,

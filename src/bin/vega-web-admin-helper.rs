@@ -297,6 +297,7 @@ fn worker() -> Result<()> {
                 return Err("worker not committed".into());
             }
             match operation {
+                Operation::InstallNvidia => Ok(dbus.software().install_nvidia(true).await?),
                 Operation::InstallNative(name) => Ok::<_, Box<dyn std::error::Error>>(
                     dbus.software().install("official", &name).await?,
                 ),

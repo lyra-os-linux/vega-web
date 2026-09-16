@@ -448,6 +448,28 @@ assert all(outcome.values()), outcome
     assert grant.hex() not in audit_log and grant2.hex() not in audit_log
     log('real Polkit challenges preserve actual UID, action and transaction without credentials/grants')
     https_tests()
+    # NVIDIA is a separate typed operation, never a caller-selected package.
+    # This VM has no NVIDIA GPU; authorization must preserve alice's UID and
+    # the accepted transaction must fail without changing any RPM.
+    rejected(frame(user='bob', operation=b'\x03'))
+    rejected(frame(password='wrong-password', operation=b'\x03'))
+    rejected(frame(operation=b'\x03\x01'))
+    before = command('rpm', '-qa').stdout
+    stream, grant, _ = prepare(operation=b'\x03')
+    with stream:
+        transaction = commit(stream, grant)
+    assert transaction and transaction > 0
+    def nvidia_refused():
+        events = Path('/var/log/transactions.log').read_text()
+        result = re.search(r'member=TransactionFinished\s+uint32 ' + str(transaction) + r'\s+boolean (true|false)', events)
+        if result is None:
+            return False
+        assert result[1] == 'false', events[-5000:]
+        return True
+    until(nvidia_refused)
+    assert command('rpm', '-qa').stdout == before
+    assert not Path('/var/lib/vegad-nvidia/recovery.json').exists()
+    log('NVIDIA typed request authenticates the real administrator; unsupported guest fails without RPM changes')
     print('LYRA_ADMIN_VM_RESULT=0', flush=True)
 
 
