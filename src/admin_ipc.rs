@@ -17,6 +17,7 @@ const MAX_OPERATION: usize = 201;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Operation {
     InstallNative(String),
+    InstallNvidia,
     AddPort { port: u16, tcp: bool },
 }
 
@@ -54,13 +55,14 @@ impl Operation {
 
     pub fn action_id(&self) -> &'static str {
         match self {
-            Self::InstallNative(_) => "org.lyraos.vega.software.install",
+            Self::InstallNative(_) | Self::InstallNvidia => "org.lyraos.vega.software.install",
             Self::AddPort { .. } => "org.lyraos.vega.firewall.configure",
         }
     }
 
     pub fn encode(&self) -> io::Result<Vec<u8>> {
         match self {
+            Self::InstallNvidia => Ok(vec![3]),
             Self::InstallNative(name) => {
                 Self::install(name)?;
                 let mut bytes = vec![1];
@@ -79,6 +81,7 @@ impl Operation {
 
     pub fn decode(bytes: &[u8]) -> io::Result<Self> {
         match bytes {
+            [3] => Ok(Self::InstallNvidia),
             [1, name @ ..] => Self::install(std::str::from_utf8(name).map_err(|_| invalid())?),
             [2, high, low, tcp @ (0 | 1)] => {
                 let port = u16::from_be_bytes([*high, *low]);
@@ -255,6 +258,23 @@ pub async fn execute(path: &Path, request: Request) -> io::Result<Completed> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn nvidia_is_a_distinct_parameter_free_operation() {
+        let operation = Operation::InstallNvidia;
+        assert_eq!(
+            Operation::decode(&operation.encode().unwrap()).unwrap(),
+            operation
+        );
+        assert_eq!(operation.action_id(), "org.lyraos.vega.software.install");
+        for forged in [&[3, 0][..], &[3, 1][..], &[3, b'-', b'f'][..]] {
+            assert!(Operation::decode(forged).is_err())
+        }
+        let frame = encode_request(&request(operation.clone())).unwrap();
+        let parsed = read_request(&mut frame.as_slice()).unwrap();
+        assert_eq!(parsed.operation, operation);
+        assert_eq!(parsed.session, [7; 32]);
+    }
 
     fn request(operation: Operation) -> Request {
         Request {

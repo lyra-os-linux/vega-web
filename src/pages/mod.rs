@@ -6,6 +6,7 @@ pub mod hardware;
 pub mod logs;
 pub mod monitor;
 pub mod network;
+pub mod nvidia;
 pub mod services;
 pub mod snapshots;
 pub mod software;

@@ -13,6 +13,7 @@ pub async fn handler(
     Extension(user): Extension<CurrentUser>,
 ) -> Html<String> {
     let mut body = String::new();
+    body.push_str("<p><a href=\"/hardware/nvidia\">NVIDIA</a></p>");
 
     match state.dbus.hardware().inventory().await {
         Ok(inventory) => body.push_str(&format!(

@@ -140,6 +140,7 @@ async fn authorization_integration_rejects_writes_without_calling_daemon() {
     let key = Key::generate();
     let sessions = SessionStore::new(SessionPolicy::default());
     let state = AppState {
+        nvidia_jobs: Default::default(),
         dbus,
         sessions: sessions.clone(),
         cookie_key: key.clone(),
@@ -242,6 +243,7 @@ async fn authorization_integration_admin_frontdoor_rejects_forgery_before_broker
     assert_ne!(alice.csrf, bob.csrf);
     assert_ne!(alice.admin_binding, bob.admin_binding);
     let state = AppState {
+        nvidia_jobs: Default::default(),
         dbus: lyra_vega_dbus::VegaDbus::connect().await.unwrap(),
         sessions: sessions.clone(),
         cookie_key: key.clone(),
@@ -276,6 +278,38 @@ async fn authorization_integration_admin_frontdoor_rejects_forgery_before_broker
         .collect();
     assert!(!response.contains(&binding_hex));
     for (status, body) in [
+        (
+            403,
+            "action=install-nvidia&confirmed=yes&language=en&csrf=forged&password=secret".into(),
+        ),
+        (
+            400,
+            format!(
+                "action=install-nvidia&language=en&csrf={}&password=secret",
+                alice.csrf
+            ),
+        ),
+        (
+            400,
+            format!(
+                "action=install-nvidia&confirmed=no&language=en&csrf={}&password=secret",
+                alice.csrf
+            ),
+        ),
+        (
+            400,
+            format!(
+                "action=install-nvidia&confirmed=yes&language=en&package=evil&csrf={}&password=secret",
+                alice.csrf
+            ),
+        ),
+        (
+            400,
+            format!(
+                "action=install-nvidia&confirmed=yes&language=invalid&csrf={}&password=secret",
+                alice.csrf
+            ),
+        ),
         (
             403,
             "action=install&csrf=forged&package=test&password=secret".to_string(),
