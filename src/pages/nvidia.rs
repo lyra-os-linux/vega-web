@@ -269,9 +269,9 @@ pub async fn handler(
 <label>{}<br><input type="password" name="password" required autocomplete="current-password" maxlength="4096"></label>
 <button type="submit">{}</button></form>"#,
                     lang.text("Instalação opcional","Optional installation","Instalación opcional"),
-                    lang.text("RPMs oficiais NVIDIA 610.57.04, módulo assinado SUSE e integração Lyra. Requer internet, espaço para recuperação e conta administrativa. A cópia será verificada antes de instalar. Não desligue durante a operação.",
-                    "Official NVIDIA 610.57.04 RPMs, SUSE-signed module and Lyra integration. Requires internet, recovery space and an administrator account. Recovery is verified before installation. Do not power off during the operation.",
-                    "RPM oficiales NVIDIA 610.57.04, módulo firmado por SUSE e integración Lyra. Requiere internet, espacio para recuperación y cuenta administrativa. Se verificará la copia antes de instalar. No apague durante la operación."),
+                    lang.text("RPMs oficiais NVIDIA 615.71.09, módulo assinado SUSE e integração Lyra. Requer internet, espaço para recuperação e conta administrativa. A cópia será verificada antes de instalar. Não desligue durante a operação.",
+                    "Official NVIDIA 615.71.09 RPMs, SUSE-signed module and Lyra integration. Requires internet, recovery space and an administrator account. Recovery is verified before installation. Do not power off during the operation.",
+                    "RPM oficiales NVIDIA 615.71.09, módulo firmado por SUSE e integración Lyra. Requiere internet, espacio para recuperación y cuenta administrativa. Se verificará la copia antes de instalar. No apague durante la operación."),
                     html_escape(&lease.csrf),lang.code(),lang.text("Revisei a instalação e a recuperação; desejo continuar.","I reviewed installation and recovery and want to continue.","He revisado la instalación y la recuperación y deseo continuar."),
                     lang.text("Senha","Password","Contraseña"),lang.text("Autorizar instalação","Authorize installation","Autorizar instalación")));
             }
