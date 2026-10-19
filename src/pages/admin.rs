@@ -12,14 +12,6 @@ use std::time::Instant;
 use vega_web::admin_ipc::{self, Operation};
 use zeroize::Zeroizing;
 
-pub fn notice(state: &AppState) -> String {
-    if state.admin_socket.is_some() {
-        r#"<p class="notice"><a href="/administracao">Instalar pacote ou abrir porta no firewall</a>. Cada alteração exige sua senha e permissão administrativa.</p>"#.to_owned()
-    } else {
-        super::ADMINISTRATION_UNAVAILABLE_NOTICE.to_owned()
-    }
-}
-
 pub async fn handler(
     State(state): State<AppState>,
     jar: PrivateCookieJar,

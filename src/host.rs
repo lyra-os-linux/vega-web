@@ -30,6 +30,41 @@ pub fn identity() -> HostIdentity {
     }
 }
 
+/// Uptime as "Nd Nh" / "Nh Nmin" / "Nmin", from /proc/uptime.
+pub fn uptime() -> String {
+    let secs = read_trimmed("/proc/uptime")
+        .and_then(|text| text.split_whitespace().next()?.parse::<f64>().ok())
+        .unwrap_or(0.0) as u64;
+    let (days, hours, minutes) = (secs / 86_400, (secs % 86_400) / 3_600, (secs % 3_600) / 60);
+    if days > 0 {
+        format!("{days} d {hours} h")
+    } else if hours > 0 {
+        format!("{hours} h {minutes} min")
+    } else {
+        format!("{minutes} min")
+    }
+}
+
+/// The three load averages from /proc/loadavg, formatted with a comma.
+pub fn load_average() -> String {
+    read_trimmed("/proc/loadavg")
+        .map(|text| {
+            text.split_whitespace()
+                .take(3)
+                .map(|value| value.replace('.', ","))
+                .collect::<Vec<_>>()
+                .join(" · ")
+        })
+        .unwrap_or_default()
+}
+
+/// Online CPUs, from sysconf.
+pub fn cpu_count() -> usize {
+    // SAFETY: sysconf has no preconditions.
+    let count = unsafe { libc::sysconf(libc::_SC_NPROCESSORS_ONLN) };
+    if count > 0 { count as usize } else { 1 }
+}
+
 fn read_trimmed(path: &str) -> Option<String> {
     std::fs::read_to_string(path)
         .ok()

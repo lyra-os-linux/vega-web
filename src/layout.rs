@@ -65,58 +65,137 @@ small { color: var(--text-muted); }
 code { background: var(--color-inset); border-radius: 4px; padding: 0.1rem 0.4rem; font-size: 0.85em; }
 a { color: var(--accent); }
 
-.app-shell { display: grid; grid-template-columns: 236px 1fr; min-height: 100vh; }
+.app-shell { display: grid; grid-template-columns: 240px minmax(0, 1fr); min-height: 100vh; }
+/* The sidebar keeps the dark surface in both themes, like the login panel. */
 aside {
-  display: flex; flex-direction: column; gap: 1.5rem;
-  padding: 1.4rem 1rem; background: var(--color-sidebar);
-  border-right: 1px solid var(--border-subtle);
+  display: flex; flex-direction: column; gap: 1.25rem; padding: 1.4rem 1rem;
+  background: #14161c; color: #c4c9d4; border-right: 1px solid #24272f;
   position: sticky; top: 0; height: 100vh; overflow-y: auto;
 }
-.brand { display: flex; align-items: center; gap: 0.6rem; padding: 0 0.4rem; }
-.brand-mark {
-  display: grid; place-items: center; width: 32px; height: 32px; border-radius: 9px;
-  background: linear-gradient(135deg, #8b5cf6, #4f46e5 55%, #06b6d4);
-  color: #fff; font-weight: 700; font-size: 0.9rem; box-shadow: var(--shadow-sm); flex-shrink: 0;
+.brand { display: flex; align-items: center; gap: 0.65rem; padding: 0 0.4rem; }
+.brand-logo { width: 34px; height: 34px; object-fit: contain; flex-shrink: 0; }
+.brand-text { display: grid; line-height: 1.2; }
+.brand-name { font-weight: 700; font-size: 0.9rem; letter-spacing: 0.06em; color: #eef0f4; }
+.brand-sub { font-size: 0.7rem; color: #8b91a1; }
+.host-chip {
+  display: grid; gap: 0.1rem; padding: 0.7rem 0.8rem; border-radius: var(--radius-sm);
+  background: rgb(255 255 255 / 5%); border: 1px solid rgb(255 255 255 / 8%);
 }
-.brand-name { font-weight: 700; font-size: 1.02rem; letter-spacing: -0.01em; }
+.host-chip strong { font-size: 0.88rem; color: #eef0f4; overflow-wrap: anywhere; }
+.host-chip small { font-size: 0.74rem; color: #8b91a1; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; }
 
-.nav-groups { display: flex; flex-direction: column; gap: 1.1rem; overflow-y: auto; }
+.nav-groups { display: flex; flex-direction: column; gap: 1rem; overflow-y: auto; }
 .nav-group-label {
-  margin: 0 0 0.3rem 0.6rem; color: var(--text-muted); font-size: 0.68rem;
-  font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em;
+  margin: 0 0 0.3rem 0.65rem; color: #6b7184; font-size: 0.66rem;
+  font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em;
 }
-nav { display: grid; gap: 1px; }
+nav { display: grid; gap: 2px; }
 nav a {
-  display: flex; align-items: center; gap: 0.6rem; padding: 0.5rem 0.65rem; border-radius: var(--radius-xs);
-  color: var(--text-muted); font-size: 0.86rem; font-weight: 500; text-decoration: none;
-  border-left: 2px solid transparent;
+  display: flex; align-items: center; gap: 0.6rem; padding: 0.55rem 0.65rem; border-radius: var(--radius-sm);
+  color: #c4c9d4; font-size: 0.85rem; font-weight: 500; text-decoration: none;
   transition: background-color var(--transition), color var(--transition);
 }
-nav a .icon { width: 16px; height: 16px; flex-shrink: 0; opacity: 0.85; }
-nav a:hover { color: var(--text-primary); background: var(--surface-hover); }
-nav a.active { color: var(--accent); background: var(--accent-soft-bg); border-left-color: var(--accent); font-weight: 600; }
+nav a .icon { width: 16px; height: 16px; flex-shrink: 0; opacity: 0.9; }
+nav a:hover { color: #eef0f4; background: rgb(255 255 255 / 6%); }
+nav a.active { color: #eef0f4; background: rgb(167 139 250 / 18%); font-weight: 600; }
+nav a.active .icon { color: #c4b5fd; opacity: 1; }
 
-.sidebar-foot { margin-top: auto; display: grid; gap: 0.4rem; padding-top: 0.9rem; border-top: 1px solid var(--border-subtle); }
-.sidebar-user { padding: 0 0.5rem; font-size: 0.8rem; color: var(--text-muted); overflow-wrap: anywhere; }
-.sidebar-foot form { margin: 0; }
-.sidebar-foot button {
-  width: 100%; text-align: left; padding: 0.5rem 0.65rem; border-radius: var(--radius-xs);
-  color: var(--text-muted); background: transparent; border: 0; font: inherit; cursor: pointer;
+.sidebar-foot { margin-top: auto; display: grid; gap: 0.6rem; padding-top: 0.9rem; border-top: 1px solid #24272f; }
+.sidebar-user { display: flex; align-items: center; gap: 0.6rem; margin: 0; padding: 0.3rem 0.4rem; min-width: 0; }
+.sidebar-avatar {
+  display: grid; place-items: center; width: 30px; height: 30px; border-radius: 999px; flex-shrink: 0;
+  background: #2b2450; color: #d8cbff; font-size: 0.75rem; font-weight: 700; text-transform: uppercase;
+}
+.sidebar-user-text { display: grid; min-width: 0; line-height: 1.25; }
+.sidebar-user-text strong { font-size: 0.84rem; color: #eef0f4; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sidebar-user-text small { font-size: 0.7rem; color: #8b91a1; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.sidebar-tools { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; }
+.sidebar-foot form { margin: 0; max-width: none; }
+.sidebar-foot .logout {
+  display: inline-flex; align-items: center; gap: 0.4rem; padding: 0.45rem 0.7rem; border-radius: var(--radius-sm);
+  color: #8b91a1; background: transparent; border: 1px solid transparent; font: inherit; font-size: 0.8rem; cursor: pointer;
   transition: background-color var(--transition), color var(--transition);
 }
-.sidebar-foot button:hover { color: var(--text-primary); background: var(--surface-hover); }
+.sidebar-foot .logout:hover { color: #eef0f4; background: rgb(255 255 255 / 6%); }
+aside .theme-switch { background: rgb(255 255 255 / 5%); border-color: rgb(255 255 255 / 8%); }
+aside .theme-switch button { color: #8b91a1; }
+aside .theme-switch button:hover { color: #eef0f4; }
+aside .theme-switch button[aria-pressed="true"] { background: rgb(255 255 255 / 10%); color: #c4b5fd; box-shadow: none; }
 
-.content { min-width: 0; max-width: 62rem; width: 100%; margin: 0 auto; padding: 2.4rem 2.5rem 4rem; }
-.content > header { display: flex; align-items: center; gap: 1rem; margin-bottom: 1.6rem; }
-.content > header .header-icon {
-  display: grid; place-items: center; width: 46px; height: 46px; border-radius: var(--radius-md);
-  background: var(--accent-soft-bg); color: var(--accent-strong); flex-shrink: 0;
+.content { min-width: 0; max-width: 74rem; width: 100%; margin: 0 auto; padding: 1.9rem 2.25rem 4rem; }
+.content > header { display: flex; align-items: flex-end; justify-content: space-between; gap: 1rem; flex-wrap: wrap; margin-bottom: 1.4rem; }
+.content > header .heading { display: grid; gap: 0.25rem; min-width: 0; }
+.content > header h1 { margin: 0; font-size: 1.6rem; letter-spacing: -0.02em; }
+.content > header .subtitle { margin: 0; color: var(--text-secondary); font-size: 0.86rem; }
+.header-actions { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; }
+.header-actions form { margin: 0; max-width: none; display: inline; }
+.button, .header-actions button, .row-actions button, .dialog-actions button, .dialog-actions .button-link {
+  display: inline-flex; align-items: center; justify-content: center; gap: 0.4rem; min-height: 38px; padding: 0 0.9rem;
+  border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--color-surface); color: var(--text-secondary);
+  font: inherit; font-size: 0.82rem; font-weight: 600; cursor: pointer; text-decoration: none; white-space: nowrap;
+  transition: border-color var(--transition), color var(--transition), background-color var(--transition);
 }
-.content > header .header-icon .icon { width: 22px; height: 22px; }
-.content > header .heading { display: grid; gap: 0.2rem; min-width: 0; }
-.content > header .eyebrow {
-  margin: 0; color: var(--text-muted); font-size: 0.72rem;
-  font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase;
+.button:hover, .header-actions button:hover, .row-actions button:hover { color: var(--accent); border-color: var(--accent); }
+.button.primary, .header-actions button.primary, .dialog-actions button[type="submit"] {
+  border: 0; background: var(--accent-strong); color: #fff; box-shadow: 0 6px 16px rgb(109 40 217 / 20%);
+}
+.button.primary:hover, .header-actions button.primary:hover, .dialog-actions button[type="submit"]:hover { color: #fff; filter: brightness(1.08); }
+.row-actions { display: flex; justify-content: flex-end; gap: 0.35rem; flex-wrap: wrap; }
+.row-actions form { display: inline; margin: 0; max-width: none; }
+.row-actions button { min-height: 32px; padding: 0 0.7rem; font-size: 0.76rem; }
+
+/* Panels: a white card with its own header, used by the overview and lists. */
+.grid-2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.9rem; margin: 0 0 0.9rem; }
+.grid-4 { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0.9rem; margin: 0 0 0.9rem; }
+.panel { padding: 1.1rem 1.25rem; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--color-surface); box-shadow: var(--shadow-sm); min-width: 0; }
+.panel-head { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; margin: 0 0 0.6rem; }
+.panel-head h3 { margin: 0; font-size: 0.95rem; }
+.panel-head a { font-size: 0.8rem; font-weight: 600; }
+.tile { display: grid; gap: 0.5rem; padding: 1.1rem 1.25rem; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--color-surface); box-shadow: var(--shadow-sm); min-width: 0; }
+.tile-label { font-size: 0.74rem; font-weight: 600; color: var(--text-muted); }
+.tile-value { font-size: 1.75rem; font-weight: 700; letter-spacing: -0.02em; color: var(--text-primary); line-height: 1.1; overflow-wrap: anywhere; }
+.tile-value small { font-size: 0.95rem; font-weight: 500; color: var(--text-muted); }
+.tile-value.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 1.3rem; }
+.tile-foot { font-size: 0.74rem; color: var(--text-muted); }
+.kv { display: grid; }
+.kv-row { display: flex; align-items: center; justify-content: space-between; gap: 0.75rem; padding: 0.55rem 0; border-top: 1px solid var(--border-subtle); font-size: 0.84rem; }
+.kv-row:first-child { border-top: 0; }
+.kv-row .k { display: inline-flex; align-items: center; gap: 0.6rem; color: var(--text-primary); min-width: 0; }
+.kv-row .v { color: var(--text-secondary); font-size: 0.8rem; text-align: right; }
+.dot { width: 8px; height: 8px; border-radius: 999px; background: var(--success-text); flex-shrink: 0; }
+.dot.off { background: var(--danger-text); }
+.dot.warn { background: #d97706; }
+.activity { display: grid; grid-template-columns: 4rem minmax(0, 1fr) auto; font-size: 0.84rem; }
+.activity > span { padding: 0.5rem 0; border-top: 1px solid var(--border-subtle); }
+.activity .t { color: var(--text-muted); font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.78rem; }
+.activity .who { color: var(--text-muted); text-align: right; white-space: nowrap; }
+.empty { margin: 0; padding: 1.25rem; border: 1px dashed var(--border); border-radius: var(--radius-md); color: var(--text-muted); font-size: 0.84rem; text-align: center; }
+
+/* Notices: one component, three levels, technical detail collapsed. */
+.notice { display: grid; gap: 0.35rem; padding: 0.75rem 0.95rem; border-radius: var(--radius-sm); background: var(--accent-soft-bg); color: var(--accent-soft-text); font-size: 0.86rem; margin: 0 0 1rem; }
+.notice.success { background: var(--success-bg); color: var(--success-text); }
+.notice.warn { background: #fdf1dc; color: #8a4b00; }
+.notice.error { background: var(--danger-bg); color: var(--danger-text); }
+.notice details { font-size: 0.76rem; }
+.notice summary { cursor: pointer; font-weight: 600; }
+.notice code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.72rem; overflow-wrap: anywhere; }
+:root[data-theme="dark"] .notice.warn { background: #3a2a10; color: #f5c06b; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .notice.warn { background: #3a2a10; color: #f5c06b; } }
+
+/* Confirmation dialog: a page that looks like a modal over the shell. */
+.dialog { width: min(30rem, 100%); margin: 2rem auto; padding: 1.6rem 1.75rem; border: 1px solid var(--border); border-radius: var(--radius-lg); background: var(--color-surface); box-shadow: var(--shadow-lg); display: grid; gap: 1.1rem; }
+.dialog-icon { display: grid; place-items: center; width: 42px; height: 42px; border-radius: var(--radius-md); background: var(--accent-soft-bg); color: var(--accent-soft-text); }
+.dialog-icon .icon { width: 20px; height: 20px; }
+.dialog h2 { margin: 0 0 0.3rem; font-size: 1.15rem; letter-spacing: -0.01em; }
+.dialog-summary { margin: 0; color: var(--text-secondary); font-size: 0.86rem; line-height: 1.5; }
+.dialog form { max-width: none; margin: 0; gap: 0.9rem; }
+.dialog-meta { margin: 0; color: var(--text-muted); font-size: 0.76rem; }
+.dialog-meta code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.72rem; }
+.dialog-actions { display: flex; justify-content: flex-end; gap: 0.6rem; }
+
+@media (max-width: 60rem) {
+  .grid-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .grid-2 { grid-template-columns: 1fr; }
 }
 
 .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); gap: 0.85rem; margin: 0 0 1.25rem; }
@@ -256,7 +335,6 @@ pre { background: var(--color-inset); border: 1px solid var(--border); border-ra
 .theme-switch button[aria-pressed="true"] { background: var(--color-surface); color: var(--accent); box-shadow: var(--shadow-sm); }
 .sidebar-foot .theme-switch { justify-self: start; margin: 0 0.3rem 0.2rem; }
 .auth-top { display: flex; justify-content: flex-end; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
-.brand-logo { width: 32px; height: 32px; object-fit: contain; flex-shrink: 0; }
 
 /* Login: machine panel on the left, form on the right. The panel keeps the
    dark surface in both themes; the form side follows the theme tokens. */
@@ -408,13 +486,53 @@ const NAV: &[NavGroup] = &[
         items: &[
             NavItem {
                 href: "/",
-                label: "Painel",
+                label: "Visão geral",
                 icon: "dashboard",
             },
             NavItem {
                 href: "/software",
                 label: "Software",
                 icon: "software",
+            },
+        ],
+    },
+    NavGroup {
+        label: "Sistema",
+        items: &[
+            NavItem {
+                href: "/servicos",
+                label: "Serviços",
+                icon: "services",
+            },
+            NavItem {
+                href: "/usuarios",
+                label: "Usuários",
+                icon: "users",
+            },
+            NavItem {
+                href: "/rede",
+                label: "Rede e Firewall",
+                icon: "network",
+            },
+            NavItem {
+                href: "/data-hora",
+                label: "Data e Hora",
+                icon: "datetime",
+            },
+            NavItem {
+                href: "/hardware",
+                label: "Hardware e Kernel",
+                icon: "hardware",
+            },
+        ],
+    },
+    NavGroup {
+        label: "Dados",
+        items: &[
+            NavItem {
+                href: "/armazenamento",
+                label: "Armazenamento",
+                icon: "storage",
             },
             NavItem {
                 href: "/backup",
@@ -429,33 +547,8 @@ const NAV: &[NavGroup] = &[
         ],
     },
     NavGroup {
-        label: "Sistema",
+        label: "Diagnóstico",
         items: &[
-            NavItem {
-                href: "/hardware",
-                label: "Hardware e Kernel",
-                icon: "hardware",
-            },
-            NavItem {
-                href: "/armazenamento",
-                label: "Armazenamento",
-                icon: "storage",
-            },
-            NavItem {
-                href: "/rede",
-                label: "Rede e Firewall",
-                icon: "network",
-            },
-            NavItem {
-                href: "/servicos",
-                label: "Serviços",
-                icon: "services",
-            },
-            NavItem {
-                href: "/usuarios",
-                label: "Usuários",
-                icon: "users",
-            },
             NavItem {
                 href: "/logs",
                 label: "Logs",
@@ -467,11 +560,6 @@ const NAV: &[NavGroup] = &[
                 icon: "monitor",
             },
             NavItem {
-                href: "/data-hora",
-                label: "Data e Hora",
-                icon: "datetime",
-            },
-            NavItem {
                 href: "/terminal",
                 label: "Terminal",
                 icon: "terminal",
@@ -481,8 +569,32 @@ const NAV: &[NavGroup] = &[
 ];
 
 pub fn page(title: &str, active_href: &str, user: &crate::auth::CurrentUser, body: &str) -> String {
+    page_with(title, active_href, user, "", "", body)
+}
+
+/// The shell with an optional context line under the title and primary
+/// actions on the right of the header (already-rendered HTML).
+pub fn page_with(
+    title: &str,
+    active_href: &str,
+    user: &crate::auth::CurrentUser,
+    subtitle: &str,
+    actions: &str,
+    body: &str,
+) -> String {
     let username = crate::pages::html_escape(&user.name);
     let address = crate::pages::html_escape(&user.address);
+    let initial = crate::pages::html_escape(
+        &user
+            .name
+            .chars()
+            .next()
+            .map(|c| c.to_string())
+            .unwrap_or_default(),
+    );
+    let host = crate::host::identity();
+    let hostname = crate::pages::html_escape(&host.hostname);
+    let host_address = crate::pages::html_escape(&host.addresses.join(" · "));
     let nav_groups: String = NAV
         .iter()
         .map(|group| {
@@ -510,13 +622,16 @@ pub fn page(title: &str, active_href: &str, user: &crate::auth::CurrentUser, bod
             )
         })
         .collect();
-
-    let page_icon = NAV
-        .iter()
-        .flat_map(|group| group.items)
-        .find(|item| item.href == active_href)
-        .map(|item| item.icon)
-        .unwrap_or("dashboard");
+    let subtitle_html = if subtitle.is_empty() {
+        String::new()
+    } else {
+        format!(r#"<p class="subtitle">{subtitle}</p>"#)
+    };
+    let actions_html = if actions.is_empty() {
+        String::new()
+    } else {
+        format!(r#"<div class="header-actions">{actions}</div>"#)
+    };
 
     format!(
         r#"<!doctype html>
@@ -524,34 +639,38 @@ pub fn page(title: &str, active_href: &str, user: &crate::auth::CurrentUser, bod
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{title} · Vega</title>
+<title>{title} · {hostname} · Vega</title>
 {THEME_BOOT}
 <style>{style}</style>
 </head>
 <body>
 <div class="app-shell">
 <aside>
-<div class="brand"><img class="brand-logo" src="/assets/lyra-logo.png" alt=""><span class="brand-name">Lyra OS</span></div>
+<div class="brand"><img class="brand-logo" src="/assets/lyra-logo.png" alt=""><span class="brand-text"><span class="brand-name">LYRA OS</span><span class="brand-sub">Vega · painel</span></span></div>
+<div class="host-chip"><strong>{hostname}</strong><small>{host_address}</small></div>
 <div class="nav-groups">{nav_groups}</div>
 <div class="sidebar-foot">
-<p class="sidebar-user">{username}<small>{address}</small></p>
+<p class="sidebar-user"><span class="sidebar-avatar" aria-hidden="true">{initial}</span><span class="sidebar-user-text"><strong>{username}</strong><small>{address}</small></span></p>
+<div class="sidebar-tools">
 {theme_switch}
-<form method="post" action="/logout"><button type="submit">Sair</button></form>
+<form method="post" action="/logout"><button type="submit" class="logout">{ICON_LOGOUT}Sair</button></form>
+</div>
 </div>
 </aside>
 <div class="content">
-<header><div class="header-icon">{}</div><div class="heading"><p class="eyebrow">Vega</p><h1>{title}</h1></div></header>
+<header><div class="heading"><h1>{title}</h1>{subtitle_html}</div>{actions_html}</header>
 {body}
 </div>
 </div>
 {THEME_WIRE}
 </body>
 </html>"#,
-        crate::pages::widgets::icon(page_icon),
         theme_switch = theme_switch(LoginLang::Pt),
         style = style(),
     )
 }
+
+const ICON_LOGOUT: &str = r#"<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"></path></svg>"#;
 
 const LYRA_LOGO: &[u8] = include_bytes!("../assets/lyra-logo-256.png");
 

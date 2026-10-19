@@ -608,6 +608,62 @@ mod tests {
     }
 
     #[test]
+    fn every_operation_round_trips_with_its_action_and_rejects_forged_parameters() {
+        let operations = [
+            Operation::remove_port("8443", "udp").unwrap(),
+            Operation::firewall_service("ssh", "true").unwrap(),
+            Operation::firewall_service("dhcpv6-client", "false").unwrap(),
+            Operation::service_enabled("sshd.service", "false").unwrap(),
+            Operation::service_running("vega-web.service", "true").unwrap(),
+            Operation::service_restart("getty@tty1.service").unwrap(),
+            Operation::UpdateAllNative,
+            Operation::remove("libstdc++6").unwrap(),
+            Operation::repo_enabled("repo-oss", "false").unwrap(),
+            Operation::repo_enabled("home:user:project", "true").unwrap(),
+            Operation::ClearNativeCache,
+            Operation::set_admin("rbrito", "true").unwrap(),
+            Operation::datetime("America/Sao_Paulo", "true").unwrap(),
+            Operation::datetime("UTC", "false").unwrap(),
+            Operation::datetime("Etc/GMT+3", "true").unwrap(),
+        ];
+        for operation in operations {
+            let encoded = operation.encode().unwrap();
+            assert!(encoded.len() <= MAX_OPERATION, "{operation:?}");
+            assert_eq!(Operation::decode(&encoded).unwrap(), operation);
+            assert!(operation.action_id().starts_with("org.lyraos.vega."));
+            assert!(operation.return_href().starts_with('/'));
+            assert!(!operation.describe().is_empty());
+            let frame = encode_request(&request(operation.clone())).unwrap();
+            assert_eq!(
+                read_request(&mut frame.as_slice()).unwrap().operation,
+                operation
+            );
+        }
+        assert!(
+            Operation::service_restart("sshd").is_err(),
+            "unit suffix required"
+        );
+        assert!(Operation::service_restart("../etc.service").is_err());
+        assert!(Operation::service_running("sshd.service", "yes").is_err());
+        assert!(Operation::firewall_service("ssh;rm", "true").is_err());
+        assert!(Operation::repo_enabled("repo oss", "true").is_err());
+        assert!(Operation::set_admin("Root", "true").is_err());
+        assert!(Operation::set_admin("a-very-long-user-name-beyond-posix-limits", "true").is_err());
+        assert!(Operation::datetime("America//Sao_Paulo", "true").is_err());
+        assert!(Operation::datetime("../zoneinfo", "true").is_err());
+        assert!(Operation::remove_port("0", "tcp").is_err());
+        for forged in [
+            &[5u8, 2, b's'][..],
+            &[6, 1][..],
+            &[14, 1][..],
+            &[13, 0, b'R'][..],
+            &[15][..],
+        ] {
+            assert!(Operation::decode(forged).is_err(), "{forged:?}");
+        }
+    }
+
+    #[test]
     fn bounded_frames_reject_truncation_oversize_invalid_utf8_and_unknown_operations() {
         let request = request(Operation::install("example").unwrap());
         let frame = encode_request(&request).unwrap();

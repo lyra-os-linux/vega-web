@@ -1,46 +1,72 @@
 use axum::extract::{Extension, State};
 use axum::response::Html;
+use axum_extra::extract::PrivateCookieJar;
 use lyra_vega_dbus::UsersClient;
 
 use crate::auth::CurrentUser;
 use crate::state::AppState;
 
-use super::widgets::icon_stat;
-use super::{error_body, html_escape, render};
+use super::{Actions, error_body, html_escape, render_with};
 
 pub async fn handler(
     State(state): State<AppState>,
+    jar: PrivateCookieJar,
     Extension(user): Extension<CurrentUser>,
 ) -> Html<String> {
-    let body = match state.dbus.users().list().await {
+    let actions = Actions::new(&state, &jar, &user);
+    let (subtitle, body) = match state.dbus.users().list().await {
         Ok(mut users) => {
             users.sort_by(|a, b| a.username.cmp(&b.username));
             let admins = users.iter().filter(|account| account.is_admin).count();
             let rows: String = users
                 .iter()
                 .map(|account| {
+                    // The signed-in administrator never removes their own
+                    // privilege from here; root is not managed by the panel.
+                    let own = account.username == user.name || account.username == "root";
+                    let action = if own {
+                        String::new()
+                    } else if account.is_admin {
+                        actions.button(
+                            "Retirar administrador",
+                            "set-admin",
+                            &[("name", &account.username), ("enabled", "false")],
+                        )
+                    } else {
+                        actions.button(
+                            "Tornar administrador",
+                            "set-admin",
+                            &[("name", &account.username), ("enabled", "true")],
+                        )
+                    };
                     format!(
-                        "<tr><td>{}<br><small>{}</small></td><td>{}</td><td><span class=\"badge {}\">{}</span></td></tr>",
+                        r#"<tr><td>{}<small>{}</small></td><td>{}</td><td>{}</td><td><div class="row-actions">{action}</div></td></tr>"#,
                         html_escape(&account.username),
                         html_escape(&account.full_name),
                         html_escape(&account.groups.join(", ")),
-                        if account.is_admin { "on" } else { "off" },
-                        if account.is_admin { "administrador" } else { "" },
+                        if account.is_admin {
+                            r#"<span class="badge on">administrador</span>"#
+                        } else {
+                            ""
+                        },
                     )
                 })
                 .collect();
-            format!(
-                r#"<div class="cards">{} {}</div>
-<table>
-<thead><tr><th>Usuário</th><th>Grupos</th><th></th></tr></thead>
+            (
+                format!("{} conta(s) · {admins} administrador(es)", users.len()),
+                format!(
+                    r#"{}<table>
+<thead><tr><th>Usuário</th><th>Grupos</th><th></th><th></th></tr></thead>
 <tbody>{rows}</tbody>
 </table>"#,
-                icon_stat("users", "Contas", &users.len().to_string()),
-                icon_stat("check", "Administradores", &admins.to_string()),
+                    actions.notice()
+                ),
             )
         }
-        Err(error) => error_body("Lista de usuários indisponível", error),
+        Err(error) => (
+            String::new(),
+            error_body("Lista de usuários indisponível", error),
+        ),
     };
-
-    render("Usuários", "/usuarios", &user, body)
+    render_with("Usuários", "/usuarios", &user, &subtitle, "", body)
 }
