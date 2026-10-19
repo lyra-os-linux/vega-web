@@ -5,7 +5,9 @@ mod admin_polkit;
 #[path = "../pam_ffi.rs"]
 mod pam_ffi;
 
-use lyra_vega_dbus::{FirewallClient, SoftwareClient, VegaDbus};
+use lyra_vega_dbus::{
+    DateTimeClient, FirewallClient, ServicesClient, SoftwareClient, UsersClient, VegaDbus,
+};
 use rand::RngExt;
 use std::ffi::{CStr, CString};
 use std::io::{self, Read, Write};
@@ -258,7 +260,7 @@ fn worker() -> Result<()> {
     let mut length = [0u8; 2];
     io::stdin().read_exact(&mut length)?;
     let length = u16::from_be_bytes(length) as usize;
-    if !(8..=463).contains(&length) {
+    if !(8..=464).contains(&length) {
         return Err("invalid worker request".into());
     }
     let mut frame = vec![0u8; length];
@@ -304,6 +306,49 @@ fn worker() -> Result<()> {
                 Operation::AddPort { port, tcp } => {
                     dbus.firewall()
                         .add_port(&port.to_string(), if tcp { "tcp" } else { "udp" })
+                        .await?;
+                    Ok(0)
+                }
+                Operation::RemovePort { port, tcp } => {
+                    dbus.firewall()
+                        .remove_port(&port.to_string(), if tcp { "tcp" } else { "udp" })
+                        .await?;
+                    Ok(0)
+                }
+                Operation::FirewallService { name, enabled } => {
+                    dbus.firewall().set_service(&name, enabled).await?;
+                    Ok(0)
+                }
+                Operation::ServiceEnabled { name, enabled } => {
+                    dbus.services().set_enabled(&name, enabled).await?;
+                    Ok(0)
+                }
+                Operation::ServiceRunning { name, running } => {
+                    dbus.services().set_running(&name, running).await?;
+                    Ok(0)
+                }
+                Operation::ServiceRestart(name) => {
+                    dbus.services().restart(&name).await?;
+                    Ok(0)
+                }
+                Operation::UpdateAllNative => Ok(dbus.software().update_all_native().await?),
+                Operation::RemoveNative(name) => {
+                    Ok(dbus.software().remove("official", &name).await?)
+                }
+                Operation::RepoEnabled { name, enabled } => {
+                    dbus.software().set_repo_enabled(&name, enabled).await?;
+                    Ok(0)
+                }
+                Operation::ClearNativeCache => Ok(dbus.software().clear_native_cache().await?),
+                Operation::SetAdmin { username, admin } => {
+                    dbus.users().set_admin(&username, admin).await?;
+                    Ok(0)
+                }
+                Operation::DateTime { timezone, ntp } => {
+                    let datetime = dbus.datetime();
+                    let current = datetime.status().await?;
+                    datetime
+                        .apply(&timezone, ntp, &current.locale, &current.keymap)
                         .await?;
                     Ok(0)
                 }
