@@ -1,4 +1,5 @@
 mod auth;
+mod host;
 mod layout;
 mod pages;
 mod state;
@@ -137,6 +138,7 @@ fn build_router(state: AppState) -> Router {
     protected
         .route("/login", get(auth::login_form).post(auth::login_submit))
         .route("/logout", post(auth::logout))
+        .route("/assets/lyra-logo.png", get(layout::lyra_logo))
         .with_state(state)
 }
 

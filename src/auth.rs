@@ -1,5 +1,5 @@
 use axum::Form;
-use axum::extract::{ConnectInfo, Request, State};
+use axum::extract::{ConnectInfo, RawQuery, Request, State};
 use axum::middleware::Next;
 use axum::response::{Html, IntoResponse, Redirect, Response};
 use axum_extra::extract::cookie::{Cookie, PrivateCookieJar, SameSite};
@@ -63,14 +63,73 @@ pub async fn require_session(
     }
 }
 
-pub async fn login_form() -> Html<String> {
-    Html(login_page(None))
+/// Language of the login page, chosen with `?lang=` and carried by the form.
+/// The panel itself keeps its single language; this only covers the page a
+/// visitor sees before authenticating.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum LoginLang {
+    Pt,
+    En,
+    Es,
+}
+
+impl LoginLang {
+    pub fn parse(value: Option<&str>) -> Self {
+        match value.map(str::trim) {
+            Some("en" | "en-US") => Self::En,
+            Some("es" | "es-ES") => Self::Es,
+            _ => Self::Pt,
+        }
+    }
+
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::Pt => "pt-BR",
+            Self::En => "en-US",
+            Self::Es => "es-ES",
+        }
+    }
+
+    pub fn text<'a>(self, pt: &'a str, en: &'a str, es: &'a str) -> &'a str {
+        match self {
+            Self::Pt => pt,
+            Self::En => en,
+            Self::Es => es,
+        }
+    }
+}
+
+/// `?lang=` on the login page; any other or malformed query is ignored.
+fn query_lang(query: Option<&str>) -> LoginLang {
+    let value = query
+        .unwrap_or_default()
+        .split('&')
+        .find_map(|pair| pair.strip_prefix("lang="));
+    LoginLang::parse(value)
+}
+
+pub async fn login_form(RawQuery(query): RawQuery) -> Html<String> {
+    Html(login_page(
+        None,
+        query_lang(query.as_deref()),
+        &crate::host::identity(),
+    ))
 }
 
 #[derive(Deserialize)]
 pub struct LoginRequest {
     username: String,
     password: String,
+    lang: Option<String>,
+}
+
+fn login_error(lang: LoginLang, pt: &str, en: &str, es: &str) -> Response {
+    Html(login_page(
+        Some(lang.text(pt, en, es)),
+        lang,
+        &crate::host::identity(),
+    ))
+    .into_response()
 }
 
 pub async fn login_submit(
@@ -79,9 +138,15 @@ pub async fn login_submit(
     jar: PrivateCookieJar,
     Form(form): Form<LoginRequest>,
 ) -> Response {
+    let lang = LoginLang::parse(form.lang.as_deref());
     let username = form.username.trim().to_string();
     if username.is_empty() || form.password.is_empty() {
-        return Html(login_page(Some("Usuário e senha são obrigatórios."))).into_response();
+        return login_error(
+            lang,
+            "Usuário e senha são obrigatórios.",
+            "Username and password are required.",
+            "Usuario y contraseña son obligatorios.",
+        );
     }
 
     let ip = remote.ip().to_string();
@@ -91,10 +156,12 @@ pub async fn login_submit(
             "vega-web: login bloqueado ip={ip} usuário={username:?} espera={}s",
             wait.as_secs().max(1)
         );
-        return Html(login_page(Some(
+        return login_error(
+            lang,
             "Muitas tentativas. Aguarde antes de tentar novamente.",
-        )))
-        .into_response();
+            "Too many attempts. Wait before trying again.",
+            "Demasiados intentos. Espere antes de volver a intentarlo.",
+        );
     }
 
     let permit = match state.pam_slots.clone().try_acquire_owned() {
@@ -103,10 +170,12 @@ pub async fn login_submit(
             eprintln!(
                 "vega-web: login recusado por limite de autenticações simultâneas ip={ip} usuário={username:?}"
             );
-            return Html(login_page(Some(
+            return login_error(
+                lang,
                 "Servidor de autenticação ocupado. Tente novamente.",
-            )))
-            .into_response();
+                "Authentication service busy. Try again.",
+                "Servicio de autenticación ocupado. Inténtelo de nuevo.",
+            );
         }
     };
     let result = run_authentication(
@@ -132,13 +201,23 @@ pub async fn login_submit(
             let delay = state.login_limiter.failure(&ip, &username, Instant::now());
             eprintln!("vega-web: login falhou ip={ip} usuário={username:?}");
             tokio::time::sleep(delay).await;
-            Html(login_page(Some("Usuário ou senha inválidos."))).into_response()
+            login_error(
+                lang,
+                "Usuário ou senha inválidos.",
+                "Invalid username or password.",
+                "Usuario o contraseña inválidos.",
+            )
         }
         Err(error) => {
             let delay = state.login_limiter.failure(&ip, &username, Instant::now());
             eprintln!("vega-web: tarefa PAM falhou ip={ip} usuário={username:?}: {error}");
             tokio::time::sleep(delay).await;
-            Html(login_page(Some("Falha temporária na autenticação."))).into_response()
+            login_error(
+                lang,
+                "Falha temporária na autenticação.",
+                "Temporary authentication failure.",
+                "Fallo temporal de autenticación.",
+            )
         }
     }
 }
