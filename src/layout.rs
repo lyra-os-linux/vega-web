@@ -1,4 +1,8 @@
-const STYLE: &str = r#"
+use crate::auth::LoginLang;
+use crate::host::HostIdentity;
+use std::sync::OnceLock;
+
+const STYLE_TEMPLATE: &str = r#"
 :root {
   color-scheme: light dark;
   --color-canvas: #f4f5f8;
@@ -33,33 +37,15 @@ const STYLE: &str = r#"
   --transition: 150ms ease;
 }
 @media (prefers-color-scheme: dark) {
-  :root {
-    --color-canvas: #0f1115;
-    --color-sidebar: #14161c;
-    --color-surface: #181b22;
-    --color-inset: #12141a;
-    --color-field: #11131a;
-    --surface-hover: #242a3a;
-    --border-subtle: #24272f;
-    --border: #2b2f39;
-    --border-strong: #383d4a;
-    --text-primary: #eef0f4;
-    --text-secondary: #c4c9d4;
-    --text-muted: #8b91a1;
-    --accent: #a78bfa;
-    --accent-strong: #c4b5fd;
-    --accent-soft-bg: #2b2450;
-    --accent-soft-text: #d8cbff;
-    --focus-ring: rgb(167 139 250 / 25%);
-    --success-bg: #1c3a2c;
-    --success-text: #9fdcbb;
-    --danger-bg: #3c1e24;
-    --danger-text: #ffb0bc;
-    --shadow-sm: 0 1px 3px rgb(0 0 0 / 30%);
-    --shadow-md: 0 8px 24px rgb(0 0 0 / 35%);
-    --shadow-lg: 0 24px 60px rgb(0 0 0 / 45%);
+  :root:not([data-theme="light"]) {
+@@DARK@@
   }
 }
+:root[data-theme="dark"] {
+@@DARK@@
+  color-scheme: dark;
+}
+:root[data-theme="light"] { color-scheme: light; }
 * { box-sizing: border-box; }
 body {
   margin: 0;
@@ -261,56 +247,149 @@ form button[type="submit"]:hover { filter: brightness(1.08); }
 
 pre { background: var(--color-inset); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 1rem; overflow-x: auto; }
 
-.auth-shell {
-  position: relative; isolation: isolate; min-height: 100vh; display: grid; place-items: center;
-  padding: 2rem 1.5rem; overflow: hidden;
-  background:
-    radial-gradient(circle at 16% 12%, var(--accent-soft-bg), transparent 34rem),
-    radial-gradient(circle at 88% 86%, rgb(6 182 212 / 10%), transparent 30rem),
-    var(--color-canvas);
+.theme-switch { display: inline-flex; gap: 2px; padding: 3px; border-radius: 999px; background: var(--color-inset); border: 1px solid var(--border-subtle); }
+.theme-switch button {
+  width: 32px; height: 28px; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: 999px;
+  background: transparent; color: var(--text-muted); cursor: pointer; transition: background-color var(--transition), color var(--transition);
 }
-.auth-shell::before, .auth-shell::after {
-  content: ""; position: absolute; z-index: -1; border: 1px solid var(--border-subtle);
-  border-radius: 50%; opacity: 0.65;
+.theme-switch button:hover { color: var(--text-primary); }
+.theme-switch button[aria-pressed="true"] { background: var(--color-surface); color: var(--accent); box-shadow: var(--shadow-sm); }
+.sidebar-foot .theme-switch { justify-self: start; margin: 0 0.3rem 0.2rem; }
+.auth-top { display: flex; justify-content: flex-end; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
+.brand-logo { width: 32px; height: 32px; object-fit: contain; flex-shrink: 0; }
+
+/* Login: machine panel on the left, form on the right. The panel keeps the
+   dark surface in both themes; the form side follows the theme tokens. */
+.auth-shell { min-height: 100vh; display: grid; grid-template-columns: minmax(20rem, 38%) minmax(0, 1fr); background: var(--color-canvas); }
+.auth-panel {
+  display: flex; flex-direction: column; justify-content: space-between; gap: 2rem; padding: 3rem;
+  background: #14161c; color: #eef0f4; border-right: 1px solid #24272f;
+  background-image: linear-gradient(rgb(255 255 255 / 3.5%) 1px, transparent 1px), linear-gradient(90deg, rgb(255 255 255 / 3.5%) 1px, transparent 1px);
+  background-size: 48px 48px;
 }
-.auth-shell::before { width: 28rem; height: 28rem; top: -17rem; right: -8rem; }
-.auth-shell::after { width: 22rem; height: 22rem; bottom: -14rem; left: -6rem; }
-.auth-wrap { width: min(26rem, 100%); }
-.auth-brand {
-  display: flex; align-items: center; justify-content: center; gap: 0.65rem;
-  margin-bottom: 1.25rem; color: var(--text-primary);
+.auth-brand { display: flex; align-items: center; gap: 0.85rem; font-weight: 700; font-size: 1.25rem; letter-spacing: 0.06em; }
+.auth-brand img { width: 48px; height: 48px; object-fit: contain; }
+.auth-host { display: flex; flex-direction: column; gap: 1.75rem; }
+.auth-kicker { margin: 0 0 0.6rem; color: #a78bfa; font-size: 0.7rem; font-weight: 700; letter-spacing: 0.09em; text-transform: uppercase; }
+.auth-host h2 { margin: 0; font-size: clamp(2rem, 4vw, 3rem); line-height: 1.05; letter-spacing: -0.02em; color: #eef0f4; overflow-wrap: anywhere; }
+.auth-ip { margin: 0.5rem 0 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 1.3rem; font-weight: 500; color: #eef0f4; overflow-wrap: anywhere; }
+.auth-edition { margin: 0.4rem 0 0; color: #c4c9d4; font-size: 0.95rem; }
+.host-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.75rem; }
+.host-card { display: flex; flex-direction: column; gap: 0.35rem; padding: 0.85rem 1rem; border-radius: var(--radius-md); background: rgb(255 255 255 / 5%); border: 1px solid rgb(255 255 255 / 8%); }
+.host-card small { color: #8b91a1; font-size: 0.75rem; }
+.host-card strong { display: inline-flex; align-items: center; gap: 0.5rem; font-size: 0.9rem; font-weight: 600; color: #eef0f4; overflow-wrap: anywhere; }
+.host-dot { width: 8px; height: 8px; border-radius: 999px; background: #9fdcbb; flex-shrink: 0; }
+.host-dot.off { background: #ffb0bc; }
+.auth-foot { display: flex; align-items: center; gap: 0.6rem; margin: 0; color: #8b91a1; font-size: 0.8rem; }
+.auth-main { display: flex; flex-direction: column; justify-content: space-between; gap: 2rem; padding: 2.5rem 3rem; min-width: 0; }
+.auth-lang { display: flex; justify-content: flex-end; align-items: center; gap: 0.5rem; margin: 0; max-width: none; }
+.auth-lang label { display: inline-flex; align-items: center; gap: 0.5rem; font-size: 0.8rem; }
+.auth-lang select { width: auto; min-height: 40px; padding: 0.45rem 2rem 0.45rem 0.75rem; }
+.auth-lang button[type="submit"] { min-height: 40px; padding: 0.45rem 0.8rem; }
+.auth-card { width: min(26rem, 100%); margin: 0 auto; display: flex; flex-direction: column; gap: 1.75rem; }
+.auth-card h1 { margin: 0; font-size: 2.1rem; line-height: 1.1; letter-spacing: -0.02em; overflow-wrap: anywhere; }
+.auth-subtitle { margin: 0.6rem 0 0; font-size: 0.95rem; line-height: 1.55; color: var(--text-secondary); }
+.auth-subtitle code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.82rem; padding: 0.1rem 0.4rem; border-radius: 6px; background: var(--accent-soft-bg); color: var(--accent-soft-text); }
+.auth-card form { max-width: none; margin: 0; gap: 1rem; }
+.auth-card .error { margin: 0; border: 1px solid color-mix(in srgb, var(--danger-text) 24%, transparent); }
+.field { display: grid; gap: 0.4rem; }
+.field label { font-size: 0.8rem; font-weight: 600; color: var(--text-secondary); }
+.field-input { position: relative; display: flex; align-items: center; }
+.field-input > svg { position: absolute; left: 0.9rem; color: var(--text-muted); pointer-events: none; }
+.field-input input { min-height: 48px; padding: 0.7rem 0.9rem 0.7rem 2.65rem; border-radius: 12px; font-size: 0.95rem; }
+.field-input input.has-peek { padding-right: 3rem; }
+.peek {
+  position: absolute; right: 0.3rem; width: 40px; height: 40px; display: inline-flex; align-items: center; justify-content: center;
+  border: 0; border-radius: 10px; background: transparent; color: var(--text-muted);
 }
-.auth-brand .brand-mark { width: 38px; height: 38px; border-radius: 11px; font-size: 1rem; }
-.auth-brand .brand-name { font-size: 1.08rem; }
-.auth-brand-product { color: var(--text-muted); font-size: 0.78rem; font-weight: 500; }
-.auth-brand-product::before { content: "·"; margin-right: 0.65rem; }
-.auth-card {
-  width: 100%; padding: 2.25rem; border: 1px solid var(--border);
-  border-radius: var(--radius-lg); background: color-mix(in srgb, var(--color-surface) 96%, transparent);
-  box-shadow: var(--shadow-lg); backdrop-filter: blur(12px); text-align: left;
-}
-.auth-kicker {
-  margin: 0 0 0.5rem; color: var(--accent); font-size: 0.7rem; font-weight: 750;
-  letter-spacing: 0.09em; text-transform: uppercase;
-}
-.auth-card h1 { font-size: 1.7rem; margin-bottom: 0.55rem; }
-.auth-subtitle { margin: 0; font-size: 0.9rem; line-height: 1.55; }
-.auth-card form { max-width: none; margin: 1.75rem 0 0; gap: 1rem; }
-.auth-card form label { gap: 0.45rem; font-size: 0.78rem; }
-.auth-card input { min-height: 44px; padding: 0.68rem 0.8rem; }
-.auth-card .error { margin: 1.25rem 0 -0.35rem; border: 1px solid color-mix(in srgb, var(--danger-text) 24%, transparent); }
+.peek:hover { color: var(--accent); background: var(--surface-hover); }
 .auth-card button[type="submit"] {
-  width: 100%; min-height: 44px; justify-self: stretch; margin-top: 0.3rem; text-align: center;
-  background: linear-gradient(135deg, #7c3aed, #5b4de5); box-shadow: 0 8px 18px rgb(109 40 217 / 20%);
+  width: 100%; min-height: 50px; justify-self: stretch; margin-top: 0.4rem; text-align: center; border-radius: 12px;
+  font-size: 0.95rem; box-shadow: 0 8px 24px rgb(109 40 217 / 22%);
 }
 .auth-card button[type="submit"]:active { transform: translateY(1px); }
-.auth-footnote { margin: 1rem 0 0; text-align: center; color: var(--text-muted); font-size: 0.75rem; }
-@media (max-width: 30rem) {
-  .auth-shell { padding: 1.25rem 1rem; align-items: center; }
-  .auth-card { padding: 1.6rem 1.35rem; }
-  .auth-card h1 { font-size: 1.45rem; }
+.auth-notes { display: grid; gap: 0.6rem; padding-top: 0.5rem; border-top: 1px solid var(--border-subtle); }
+.auth-notes p { margin: 0; color: var(--text-muted); font-size: 0.8rem; line-height: 1.5; }
+.auth-notes code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.75rem; padding: 0.1rem 0.4rem; border-radius: 6px; background: var(--color-inset); color: var(--text-secondary); }
+.auth-footnote { margin: 0; text-align: center; color: var(--text-muted); font-size: 0.75rem; }
+@media (max-width: 52rem) {
+  .auth-shell { grid-template-columns: 1fr; }
+  .auth-panel { padding: 3.5rem 1.5rem 1.75rem; border-right: 0; border-radius: 0 0 28px 28px; gap: 1.25rem; }
+  .auth-host { gap: 1rem; }
+  .host-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .auth-main { padding: 1.75rem 1rem 1.25rem; }
+  .auth-lang { justify-content: flex-start; }
+  .auth-card h1 { font-size: 1.6rem; }
+  .field-input input { font-size: 1rem; }
 }
 "#;
+
+/// The dark tokens, applied by the system preference unless the visitor chose
+/// light, and always when the visitor chose dark.
+const DARK_TOKENS: &str = r#"    --color-canvas: #0f1115;
+    --color-sidebar: #14161c;
+    --color-surface: #181b22;
+    --color-inset: #12141a;
+    --color-field: #11131a;
+    --surface-hover: #242a3a;
+    --border-subtle: #24272f;
+    --border: #2b2f39;
+    --border-strong: #383d4a;
+    --text-primary: #eef0f4;
+    --text-secondary: #c4c9d4;
+    --text-muted: #8b91a1;
+    --accent: #a78bfa;
+    --accent-strong: #c4b5fd;
+    --accent-soft-bg: #2b2450;
+    --accent-soft-text: #d8cbff;
+    --focus-ring: rgb(167 139 250 / 25%);
+    --success-bg: #1c3a2c;
+    --success-text: #9fdcbb;
+    --danger-bg: #3c1e24;
+    --danger-text: #ffb0bc;
+    --shadow-sm: 0 1px 3px rgb(0 0 0 / 30%);
+    --shadow-md: 0 8px 24px rgb(0 0 0 / 35%);
+    --shadow-lg: 0 24px 60px rgb(0 0 0 / 45%);"#;
+
+fn style() -> &'static str {
+    static STYLE: OnceLock<String> = OnceLock::new();
+    STYLE.get_or_init(|| STYLE_TEMPLATE.replace("@@DARK@@", DARK_TOKENS))
+}
+
+/// Runs before the stylesheet applies so a chosen theme never flashes.
+const THEME_BOOT: &str = r#"<script>(function(){try{var t=localStorage.getItem("vega-theme");if(t==="dark"||t==="light"){document.documentElement.setAttribute("data-theme",t);}}catch(e){}})();</script>"#;
+
+/// Wires every theme switch on the page; the choice lives in the browser.
+const THEME_WIRE: &str = r#"<script>
+(function(){
+  function apply(value){
+    try{ if(value==="system"){localStorage.removeItem("vega-theme");}else{localStorage.setItem("vega-theme",value);} }catch(e){}
+    if(value==="system"){document.documentElement.removeAttribute("data-theme");}else{document.documentElement.setAttribute("data-theme",value);}
+    document.querySelectorAll("[data-theme-choice]").forEach(function(b){b.setAttribute("aria-pressed",b.getAttribute("data-theme-choice")===value?"true":"false");});
+  }
+  var current=document.documentElement.getAttribute("data-theme")||"system";
+  document.querySelectorAll("[data-theme-choice]").forEach(function(b){
+    b.setAttribute("aria-pressed",b.getAttribute("data-theme-choice")===current?"true":"false");
+    b.addEventListener("click",function(){apply(b.getAttribute("data-theme-choice"));});
+  });
+})();
+</script>"#;
+
+/// Three-way theme switch: system (default), light, dark.
+fn theme_switch(lang: LoginLang) -> String {
+    let t = |pt: &'static str, en: &'static str, es: &'static str| lang.text(pt, en, es);
+    format!(
+        r#"<div class="theme-switch" role="group" aria-label="{label}">
+<button type="button" data-theme-choice="system" aria-pressed="false" title="{system}" aria-label="{system}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="4" width="20" height="13" rx="2"></rect><path d="M8 21h8M12 17v4"></path></svg></button>
+<button type="button" data-theme-choice="light" aria-pressed="false" title="{light}" aria-label="{light}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"></path></svg></button>
+<button type="button" data-theme-choice="dark" aria-pressed="false" title="{dark}" aria-label="{dark}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"></path></svg></button>
+</div>"#,
+        label = t("Tema", "Theme", "Tema"),
+        system = t("Tema do sistema", "System theme", "Tema del sistema"),
+        light = t("Tema claro", "Light theme", "Tema claro"),
+        dark = t("Tema escuro", "Dark theme", "Tema oscuro"),
+    )
+}
 
 struct NavItem {
     href: &'static str,
@@ -401,10 +480,6 @@ const NAV: &[NavGroup] = &[
     },
 ];
 
-fn brand_mark() -> &'static str {
-    r#"<span class="brand-mark">V</span>"#
-}
-
 pub fn page(title: &str, active_href: &str, username: &str, body: &str) -> String {
     let nav_groups: String = NAV
         .iter()
@@ -448,15 +523,17 @@ pub fn page(title: &str, active_href: &str, username: &str, body: &str) -> Strin
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{title} · Vega</title>
-<style>{STYLE}</style>
+{THEME_BOOT}
+<style>{style}</style>
 </head>
 <body>
 <div class="app-shell">
 <aside>
-<div class="brand">{}<span class="brand-name">Vega</span></div>
+<div class="brand"><img class="brand-logo" src="/assets/lyra-logo.png" alt=""><span class="brand-name">Lyra OS</span></div>
 <div class="nav-groups">{nav_groups}</div>
 <div class="sidebar-foot">
 <p class="sidebar-user">{username}</p>
+{theme_switch}
 <form method="post" action="/logout"><button type="submit">Sair</button></form>
 </div>
 </aside>
@@ -465,49 +542,214 @@ pub fn page(title: &str, active_href: &str, username: &str, body: &str) -> Strin
 {body}
 </div>
 </div>
+{THEME_WIRE}
 </body>
 </html>"#,
-        brand_mark(),
         crate::pages::widgets::icon(page_icon),
+        theme_switch = theme_switch(LoginLang::Pt),
+        style = style(),
     )
 }
 
-pub fn login_page(error: Option<&str>) -> String {
+const LYRA_LOGO: &[u8] = include_bytes!("../assets/lyra-logo-256.png");
+
+/// The Lyra OS logo, public because the login page shows it.
+pub async fn lyra_logo() -> axum::response::Response {
+    use axum::http::{HeaderValue, StatusCode, header};
+    use axum::response::IntoResponse;
+    let mut response = (StatusCode::OK, LYRA_LOGO).into_response();
+    response
+        .headers_mut()
+        .insert(header::CONTENT_TYPE, HeaderValue::from_static("image/png"));
+    response.headers_mut().insert(
+        header::CACHE_CONTROL,
+        HeaderValue::from_static("public, max-age=86400"),
+    );
+    response
+}
+
+fn escape(input: &str) -> String {
+    crate::pages::html_escape(input)
+}
+
+const ICON_USER: &str = r#"<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"></circle><path d="M4 21a8 8 0 0 1 16 0"></path></svg>"#;
+const ICON_LOCK: &str = r#"<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="11" width="18" height="11" rx="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg>"#;
+const ICON_EYE: &str = r#"<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z"></path><circle cx="12" cy="12" r="3"></circle></svg>"#;
+
+/// The login page: the machine on the left (name, addresses, edition and two
+/// facts read without the daemon), the form on the right. `host` is read per
+/// request so the page always names the machine that serves it.
+pub fn login_page(error: Option<&str>, lang: LoginLang, host: &HostIdentity) -> String {
+    let t = |pt: &'static str, en: &'static str, es: &'static str| lang.text(pt, en, es);
     let error_html = error
-        .map(|message| format!(r#"<p class="error" role="alert">{message}</p>"#))
+        .map(|message| format!(r#"<p class="error" role="alert">{}</p>"#, escape(message)))
         .unwrap_or_default();
+    let hostname = escape(&host.hostname);
+    let addresses = if host.addresses.is_empty() {
+        String::new()
+    } else {
+        format!(
+            r#"<p class="auth-ip">{}</p>"#,
+            host.addresses
+                .iter()
+                .map(|address| escape(address))
+                .collect::<Vec<_>>()
+                .join(" · ")
+        )
+    };
+    let edition = if host.edition.is_empty() {
+        escape(host.arch)
+    } else {
+        format!("{} · {}", escape(&host.edition), escape(host.arch))
+    };
+    let secure_boot = match host.secure_boot {
+        Some(true) => format!(
+            r#"<div class="host-card"><small>Secure Boot</small><strong><span class="host-dot" aria-hidden="true"></span>{}</strong></div>"#,
+            t("Ativo", "Enabled", "Activo")
+        ),
+        Some(false) => format!(
+            r#"<div class="host-card"><small>Secure Boot</small><strong><span class="host-dot off" aria-hidden="true"></span>{}</strong></div>"#,
+            t("Inativo", "Disabled", "Inactivo")
+        ),
+        None => String::new(),
+    };
+    let kernel = if host.kernel.is_empty() {
+        String::new()
+    } else {
+        format!(
+            r#"<div class="host-card"><small>Kernel</small><strong>{}</strong></div>"#,
+            escape(&host.kernel)
+        )
+    };
+    let option = |code: &str, label: &str| {
+        format!(
+            r#"<option value="{code}"{}>{label}</option>"#,
+            if code == lang.code() { " selected" } else { "" }
+        )
+    };
+    let options = [
+        option("pt-BR", "Português (Brasil)"),
+        option("en-US", "English (US)"),
+        option("es-ES", "Español (España)"),
+    ]
+    .concat();
 
     format!(
         r#"<!doctype html>
-<html lang="pt-br">
+<html lang="{lang_code}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Entrar · Vega</title>
-<style>{STYLE}</style>
+<title>{title} {hostname} · Vega</title>
+{THEME_BOOT}
+<style>{style}</style>
 </head>
 <body>
 <div class="auth-shell">
-<main class="auth-wrap">
-<div class="auth-brand">{}<span class="brand-name">Vega</span><span class="auth-brand-product">Administração</span></div>
-<div class="auth-card">
-<p class="auth-kicker">Área administrativa</p>
-<h1>Boas-vindas</h1>
-<p class="auth-subtitle">Entre com sua conta do sistema para administrar esta máquina com segurança.</p>
-{error_html}
-<form method="post" action="/login">
-<label for="username">Usuário</label>
-<input id="username" type="text" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" autofocus required>
-<label for="password">Senha</label>
-<input id="password" type="password" name="password" autocomplete="current-password" required>
-<button type="submit">Entrar no Vega</button>
+<aside class="auth-panel">
+<div class="auth-brand"><img src="/assets/lyra-logo.png" alt="Lyra OS"><span>LYRA OS</span></div>
+<div class="auth-host">
+<div>
+<p class="auth-kicker">{this_machine}</p>
+<h2>{hostname}</h2>
+{addresses}
+<p class="auth-edition">{edition}</p>
+</div>
+<div class="host-cards">{secure_boot}{kernel}</div>
+</div>
+<p class="auth-foot">{ICON_LOCK}<span>{security_line}</span></p>
+</aside>
+<main class="auth-main">
+<div class="auth-top">
+{theme_switch}
+<form class="auth-lang" method="get" action="/login">
+<label>{language}<select name="lang">{options}</select></label>
+<button type="submit">OK</button>
 </form>
 </div>
-<p class="auth-footnote">Acesso protegido pela autenticação do sistema</p>
+<div class="auth-card">
+<div>
+<h1>{title} {hostname}</h1>
+<p class="auth-subtitle">{subtitle_before} <code>wheel</code> {subtitle_after}</p>
+</div>
+{error_html}
+<form method="post" action="/login">
+<input type="hidden" name="lang" value="{lang_code}">
+<div class="field">
+<label for="username">{user}</label>
+<div class="field-input">{ICON_USER}<input id="username" type="text" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" autofocus required></div>
+</div>
+<div class="field">
+<label for="password">{password}</label>
+<div class="field-input">{ICON_LOCK}<input id="password" class="has-peek" type="password" name="password" autocomplete="current-password" required><button type="button" class="peek" data-peek aria-label="{show_hide}">{ICON_EYE}</button></div>
+</div>
+<button type="submit">{enter}</button>
+</form>
+<div class="auth-notes">
+<p>{note_pam}</p>
+<p>{note_console_before} <code>vega</code> {note_console_after}</p>
+</div>
+</div>
+<p class="auth-footnote">Vega {version} · Lyra OS · <a href="https://lyraos.com.br/docs/server.html">{docs}</a></p>
 </main>
 </div>
+<script>
+document.querySelectorAll("[data-peek]").forEach(function (button) {{
+  button.addEventListener("click", function () {{
+    var input = document.getElementById("password");
+    input.type = input.type === "password" ? "text" : "password";
+    input.focus();
+  }});
+}});
+</script>
+{THEME_WIRE}
 </body>
 </html>"#,
-        brand_mark()
+        lang_code = lang.code(),
+        theme_switch = theme_switch(lang),
+        style = style(),
+        version = env!("CARGO_PKG_VERSION"),
+        title = t("Entrar em", "Sign in to", "Entrar en"),
+        this_machine = t("Esta máquina", "This machine", "Esta máquina"),
+        security_line = t(
+            "Conexão TLS · autenticação pelo PAM do sistema · somente administradores",
+            "TLS connection · system PAM authentication · administrators only",
+            "Conexión TLS · autenticación PAM del sistema · solo administradores"
+        ),
+        language = t("Idioma", "Language", "Idioma"),
+        subtitle_before = t(
+            "Use sua conta do sistema. Só membros do grupo",
+            "Use your system account. Only members of the",
+            "Use su cuenta del sistema. Solo los miembros del grupo"
+        ),
+        subtitle_after = t(
+            "podem administrar esta máquina.",
+            "group can administer this machine.",
+            "pueden administrar esta máquina."
+        ),
+        user = t("Usuário", "Username", "Usuario"),
+        password = t("Senha", "Password", "Contraseña"),
+        show_hide = t(
+            "Mostrar ou ocultar a senha",
+            "Show or hide the password",
+            "Mostrar u ocultar la contraseña"
+        ),
+        enter = t("Entrar", "Sign in", "Entrar"),
+        note_pam = t(
+            "A senha é verificada pelo PAM e nunca fica guardada no navegador. Depois de entrar, cada ação administrativa pede a senha de novo.",
+            "The password is checked by PAM and never stored in the browser. After signing in, every administrative action asks for it again.",
+            "La contraseña la verifica PAM y nunca se guarda en el navegador. Tras entrar, cada acción administrativa vuelve a pedirla."
+        ),
+        note_console_before = t(
+            "Sem acesso? Use o console:",
+            "No access? Use the console:",
+            "¿Sin acceso? Use la consola:"
+        ),
+        note_console_after = t("no terminal.", "in a terminal.", "en una terminal."),
+        docs = t(
+            "Documentação do Server",
+            "Server documentation",
+            "Documentación del Server"
+        ),
     )
 }
