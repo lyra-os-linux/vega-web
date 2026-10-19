@@ -10,6 +10,7 @@ use std::net::SocketAddr;
 use std::path::Path;
 use std::time::Instant;
 use vega_web::admin_ipc::{self, Operation};
+use vega_web::admin_read::ReadQuery;
 use zeroize::Zeroizing;
 
 pub async fn handler(
@@ -100,6 +101,12 @@ impl ActionForm {
         };
         let name = || self.name.as_deref();
         let enabled = || self.enabled.as_deref();
+        if let Some(key) = self.action.strip_prefix("read-") {
+            return no_extras(&[])
+                .then(|| ReadQuery::from_key(key))
+                .flatten()
+                .map(Operation::Read);
+        }
         match self.action.as_str() {
             "install" if no_extras(&["package"]) => {
                 Operation::install(self.package.as_deref()?).ok()
@@ -392,6 +399,15 @@ pub async fn execute(
             state
                 .audit
                 .record(&username, &ip, operation.describe());
+            if let Operation::Read(query) = &operation {
+                if let (Some(cookie), Ok(json)) = (
+                    jar.get(SESSION_COOKIE),
+                    String::from_utf8(result.payload.clone()),
+                ) {
+                    state.sessions.store_read(cookie.value(), query.key(), json);
+                }
+                return Redirect::to(query.return_href()).into_response();
+            }
             let (status, message) = match &operation {
                 Operation::InstallNvidia => unreachable!("NVIDIA uses its transaction observer"),
                 Operation::InstallNative(name) => (StatusCode::ACCEPTED, format!(

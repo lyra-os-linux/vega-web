@@ -2,12 +2,13 @@ use axum::extract::{Extension, State};
 use axum::response::Html;
 use axum_extra::extract::PrivateCookieJar;
 use lyra_vega_dbus::{FirewallClient, NetworkClient};
+use vega_web::admin_read::{Firewall, FirewallPort, FirewallService, ReadQuery};
 
 use crate::auth::CurrentUser;
 use crate::state::AppState;
 
 use super::widgets::{bar, icon_stat};
-use super::{Actions, error_body, html_escape, render_with};
+use super::{Actions, cached_read, error_body, html_escape, render_with};
 
 pub async fn handler(
     State(state): State<AppState>,
@@ -108,8 +109,31 @@ pub async fn handler(
         Err(error) => body.push_str(&error_body("Status do firewall indisponível", error)),
     }
 
-    match firewall.services().await {
-        Ok(services) => {
+    let lists = match cached_read::<Firewall>(&state, &jar, ReadQuery::Firewall) {
+        Some(payload) => Ok(payload),
+        None => match (firewall.services().await, firewall.ports().await) {
+            (Ok(services), Ok(ports)) => Ok(Firewall {
+                services: services
+                    .into_iter()
+                    .map(|service| FirewallService {
+                        name: service.name,
+                        label: service.label,
+                        enabled: service.enabled,
+                    })
+                    .collect(),
+                ports: ports
+                    .into_iter()
+                    .map(|port| FirewallPort {
+                        port: port.port,
+                        protocol: port.protocol,
+                    })
+                    .collect(),
+            }),
+            (Err(error), _) | (_, Err(error)) => Err(error),
+        },
+    };
+    match lists {
+        Ok(Firewall { services, ports }) => {
             let rows: String = services
                 .iter()
                 .map(|service| {
@@ -142,15 +166,6 @@ pub async fn handler(
             body.push_str(&format!(
                 r#"<table><thead><tr><th>Serviço</th><th>Estado</th><th></th></tr></thead><tbody>{rows}</tbody></table>"#
             ));
-        }
-        Err(error) => body.push_str(&error_body(
-            "Lista de serviços do firewall indisponível",
-            error,
-        )),
-    }
-
-    match firewall.ports().await {
-        Ok(ports) => {
             let rows: String = ports
                 .iter()
                 .map(|rule| {
@@ -174,15 +189,22 @@ pub async fn handler(
                 )
             };
             body.push_str(&format!("<h3>Regras de porta personalizadas</h3>{table}"));
-            if actions.enabled() {
-                body.push_str(&actions.inline_form(
-                    "Abrir porta",
-                    "add-port",
-                    r#"<label>Porta<input type="number" name="port" min="1" max="65535" required></label><label>Protocolo<select name="protocol"><option value="tcp">TCP</option><option value="udp">UDP</option></select></label>"#,
-                ));
-            }
         }
-        Err(error) => body.push_str(&error_body("Lista de regras de porta indisponível", error)),
+        Err(error) if actions.enabled() => {
+            body.push_str(&actions.unlock(ReadQuery::Firewall, "Serviços e portas do firewall"));
+            body.push_str(&error_body("Leitura direta recusada", error));
+        }
+        Err(error) => body.push_str(&error_body(
+            "Serviços e portas do firewall indisponíveis",
+            error,
+        )),
+    }
+    if actions.enabled() {
+        body.push_str(&actions.inline_form(
+            "Abrir porta",
+            "add-port",
+            r#"<label>Porta<input type="number" name="port" min="1" max="65535" required></label><label>Protocolo<select name="protocol"><option value="tcp">TCP</option><option value="udp">UDP</option></select></label>"#,
+        ));
     }
 
     render_with("Rede e Firewall", "/rede", &user, "", "", body)

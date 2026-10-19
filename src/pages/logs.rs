@@ -1,13 +1,15 @@
 use axum::extract::{Extension, Query, State};
 use axum::response::Html;
+use axum_extra::extract::PrivateCookieJar;
 use lyra_vega_dbus::LogsClient;
 use serde::Deserialize;
+use vega_web::admin_read::{LogUnits, ReadQuery};
 
 use crate::auth::CurrentUser;
 use crate::state::AppState;
 
 use super::widgets::icon_stat;
-use super::{error_body, html_escape, render};
+use super::{Actions, cached_read, error_body, html_escape, render};
 
 const MAX_LINES: u32 = 200;
 
@@ -25,13 +27,18 @@ pub struct LogsQuery {
 
 pub async fn handler(
     State(state): State<AppState>,
+    jar: PrivateCookieJar,
     Extension(user): Extension<CurrentUser>,
     Query(query): Query<LogsQuery>,
 ) -> Html<String> {
+    let actions = Actions::new(&state, &jar, &user);
     let client = state.dbus.logs();
     let mut body = String::new();
 
-    let units = client.list_units().await;
+    let units = match cached_read::<LogUnits>(&state, &jar, ReadQuery::LogUnits) {
+        Some(payload) => Ok(payload.units),
+        None => client.list_units().await.map_err(|error| error.to_string()),
+    };
     let unit_options: String = match &units {
         Ok(units) => units
             .iter()
@@ -70,6 +77,9 @@ pub async fn handler(
     ));
 
     if let Err(error) = &units {
+        if actions.enabled() {
+            body.push_str(&actions.unlock(ReadQuery::LogUnits, "Lista de unidades"));
+        }
         body.push_str(&error_body("Lista de unidades indisponível", error));
     }
 

@@ -7,6 +7,8 @@ use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use zeroize::Zeroizing;
 
+use crate::admin_read::{MAX_PAYLOAD, ReadQuery};
+
 pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 pub const GRANT_TIMEOUT: Duration = Duration::from_secs(10);
 pub const CLIENT_TIMEOUT: Duration = Duration::from_secs(70);
@@ -24,18 +26,44 @@ const MAX_NAME: usize = 200;
 pub enum Operation {
     InstallNative(String),
     InstallNvidia,
-    AddPort { port: u16, tcp: bool },
-    RemovePort { port: u16, tcp: bool },
-    FirewallService { name: String, enabled: bool },
-    ServiceEnabled { name: String, enabled: bool },
-    ServiceRunning { name: String, running: bool },
+    AddPort {
+        port: u16,
+        tcp: bool,
+    },
+    RemovePort {
+        port: u16,
+        tcp: bool,
+    },
+    FirewallService {
+        name: String,
+        enabled: bool,
+    },
+    ServiceEnabled {
+        name: String,
+        enabled: bool,
+    },
+    ServiceRunning {
+        name: String,
+        running: bool,
+    },
     ServiceRestart(String),
     UpdateAllNative,
     RemoveNative(String),
-    RepoEnabled { name: String, enabled: bool },
+    RepoEnabled {
+        name: String,
+        enabled: bool,
+    },
     ClearNativeCache,
-    SetAdmin { username: String, admin: bool },
-    DateTime { timezone: String, ntp: bool },
+    SetAdmin {
+        username: String,
+        admin: bool,
+    },
+    DateTime {
+        timezone: String,
+        ntp: bool,
+    },
+    /// An administrative read, answered with a JSON payload.
+    Read(ReadQuery),
 }
 
 fn invalid() -> io::Error {
@@ -176,6 +204,7 @@ impl Operation {
             }
             Self::SetAdmin { .. } => "org.lyraos.vega.users.manage",
             Self::DateTime { .. } => "org.lyraos.vega.system.configure",
+            Self::Read(query) => query.action_id(),
         }
     }
 
@@ -196,6 +225,7 @@ impl Operation {
             }
             Self::SetAdmin { .. } => "/usuarios",
             Self::DateTime { .. } => "/data-hora",
+            Self::Read(query) => query.return_href(),
         }
     }
 
@@ -273,6 +303,7 @@ impl Operation {
                 "Definir o fuso horário {timezone} e {} a sincronização automática (NTP)",
                 if *ntp { "ativar" } else { "desativar" }
             ),
+            Self::Read(query) => query.describe().to_owned(),
         }
     }
 
@@ -327,6 +358,7 @@ impl Operation {
                 named(11, Some(*enabled), name)
             }
             Self::ClearNativeCache => Ok(vec![12]),
+            Self::Read(query) => Ok(vec![query.code()]),
             Self::SetAdmin { username, admin } => {
                 Self::set_admin(username, "true")?;
                 named(13, Some(*admin), username)
@@ -352,6 +384,9 @@ impl Operation {
             [3] => Ok(Self::InstallNvidia),
             [9] => Ok(Self::UpdateAllNative),
             [12] => Ok(Self::ClearNativeCache),
+            [code @ 20..=24] => ReadQuery::from_code(*code)
+                .map(Self::Read)
+                .ok_or_else(invalid),
             [1, name @ ..] => Self::install(text(name)?),
             [10, name @ ..] => Self::remove(text(name)?),
             [8, name @ ..] => Self::service_restart(text(name)?),
@@ -477,13 +512,19 @@ pub fn write_prepared(
     writer.write_all(audit)
 }
 
-pub fn write_result(writer: &mut impl Write, transaction: u32) -> io::Result<()> {
+pub fn write_result(writer: &mut impl Write, transaction: u32, payload: &[u8]) -> io::Result<()> {
+    if payload.len() > MAX_PAYLOAD {
+        return Err(invalid());
+    }
     writer.write_all(&[0])?;
-    writer.write_all(&transaction.to_be_bytes())
+    writer.write_all(&transaction.to_be_bytes())?;
+    writer.write_all(&(payload.len() as u32).to_be_bytes())?;
+    writer.write_all(payload)
 }
 
 pub struct Completed {
     pub transaction: u32,
+    pub payload: Vec<u8>,
     pub audit_id: String,
 }
 
@@ -523,11 +564,18 @@ pub async fn execute(path: &Path, request: Request) -> io::Result<Completed> {
             return Err(io::Error::other("operation rejected or failed"));
         }
         let transaction = socket.read_u32().await?;
+        let length = socket.read_u32().await? as usize;
+        if length > MAX_PAYLOAD {
+            return Err(invalid());
+        }
+        let mut payload = vec![0u8; length];
+        socket.read_exact(&mut payload).await?;
         if socket.read(&mut [0]).await? != 0 {
             return Err(invalid());
         }
         Ok(Completed {
             transaction,
+            payload,
             audit_id: audit.iter().map(|byte| format!("{byte:02x}")).collect(),
         })
     })
@@ -625,6 +673,8 @@ mod tests {
             Operation::datetime("America/Sao_Paulo", "true").unwrap(),
             Operation::datetime("UTC", "false").unwrap(),
             Operation::datetime("Etc/GMT+3", "true").unwrap(),
+            Operation::Read(ReadQuery::KernelBoot),
+            Operation::Read(ReadQuery::Firewall),
         ];
         for operation in operations {
             let encoded = operation.encode().unwrap();
@@ -658,6 +708,8 @@ mod tests {
             &[14, 1][..],
             &[13, 0, b'R'][..],
             &[15][..],
+            &[25][..],
+            &[20, 0][..],
         ] {
             assert!(Operation::decode(forged).is_err(), "{forged:?}");
         }

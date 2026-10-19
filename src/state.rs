@@ -59,6 +59,9 @@ pub struct Session {
     created_at: Instant,
     last_seen: Instant,
     expires: watch::Sender<Instant>,
+    /// Administrative reads fetched through the broker with the user's
+    /// identity, keyed by `ReadQuery::key`, with the time they were fetched.
+    reads: HashMap<String, (Instant, String)>,
 }
 
 impl Session {
@@ -74,6 +77,7 @@ impl Session {
             created_at: now,
             last_seen: now,
             expires: watch::channel(now).0,
+            reads: HashMap::new(),
         }
     }
 
@@ -129,6 +133,22 @@ impl SessionStore {
             values: HashMap::new(),
             policy,
         })))
+    }
+
+    /// Keeps one administrative read for the session; nothing is stored when
+    /// the session is gone.
+    pub fn store_read(&self, token: &str, key: &str, json: String) {
+        let mut store = self.0.lock().unwrap();
+        if let Some(session) = store.values.get_mut(token) {
+            session.reads.insert(key.to_owned(), (Instant::now(), json));
+        }
+    }
+
+    /// A read fetched less than `max_age` ago, if any.
+    pub fn cached_read(&self, token: &str, key: &str, max_age: Duration) -> Option<String> {
+        let store = self.0.lock().unwrap();
+        let (at, json) = store.values.get(token)?.reads.get(key)?;
+        (at.elapsed() < max_age).then(|| json.clone())
     }
 
     pub fn insert(&self, token: String, session: Session) {

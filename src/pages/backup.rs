@@ -1,21 +1,47 @@
 use axum::extract::{Extension, State};
 use axum::response::Html;
+use axum_extra::extract::PrivateCookieJar;
 use lyra_vega_dbus::BackupClient;
+use vega_web::admin_read::{BackupConfig, BackupConfigs, ReadQuery};
 
 use crate::auth::CurrentUser;
 use crate::state::AppState;
 
 use super::widgets::icon_stat;
-use super::{error_body, html_escape, render};
+use super::{Actions, cached_read, error_body, html_escape, render_with};
 
 pub async fn handler(
     State(state): State<AppState>,
+    jar: PrivateCookieJar,
     Extension(user): Extension<CurrentUser>,
 ) -> Html<String> {
-    let body = match state.dbus.backup().list_configs().await {
-        Ok(configs) => {
+    let actions = Actions::new(&state, &jar, &user);
+    // The session's own read (fetched with the user's identity) wins; the
+    // direct query only works where the service account is allowed.
+    let configs: Result<BackupConfigs, _> =
+        match cached_read::<BackupConfigs>(&state, &jar, ReadQuery::BackupConfigs) {
+            Some(payload) => Ok(payload),
+            None => state
+                .dbus
+                .backup()
+                .list_configs()
+                .await
+                .map(|configs| BackupConfigs {
+                    configs: configs
+                        .into_iter()
+                        .map(|config| BackupConfig {
+                            id: config.id,
+                            paths: config.paths,
+                            destination: config.destination,
+                            frequency: config.frequency,
+                        })
+                        .collect(),
+                }),
+        };
+    let body = match configs {
+        Ok(BackupConfigs { configs }) => {
             if configs.is_empty() {
-                "<p>Nenhuma configuração de backup ainda.</p>".to_string()
+                r#"<p class="empty">Nenhuma configuração de backup ainda.</p>"#.to_string()
             } else {
                 let destinations = configs
                     .iter()
@@ -36,7 +62,6 @@ pub async fn handler(
                     .collect();
                 format!(
                     r#"<div class="cards">{} {}</div>
-<p>Somente leitura nesta versão — criar/rodar backups chega numa fase seguinte.</p>
 <table>
 <thead><tr><th>ID</th><th>Caminhos</th><th>Destino</th><th>Frequência</th></tr></thead>
 <tbody>{rows}</tbody>
@@ -46,8 +71,11 @@ pub async fn handler(
                 )
             }
         }
+        Err(error) if actions.enabled() => {
+            actions.unlock(ReadQuery::BackupConfigs, "Configurações de backup")
+                + &error_body("Leitura direta recusada", error)
+        }
         Err(error) => error_body("Lista de configurações de backup indisponível", error),
     };
-
-    render("Backup", "/backup", &user, body)
+    render_with("Backup", "/backup", &user, "", "", body)
 }

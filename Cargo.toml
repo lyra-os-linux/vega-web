@@ -28,6 +28,7 @@ serde = { version = "1.0.228", features = ["derive"] }
 gettext-rs = { version = "0.7.7", features = ["gettext-system"] }
 zeroize = { version = "1.9.0", features = ["std"] }
 zbus = "5.19.0"
+serde_json = "1"
 
 [dev-dependencies]
 futures-util = { version = "0.3.34", features = ["sink"] }

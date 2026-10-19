@@ -169,6 +169,42 @@ impl Actions {
     }
 }
 
+/// How long an administrative read stays valid in the session.
+pub(crate) const READ_MAX_AGE: std::time::Duration = std::time::Duration::from_secs(300);
+
+/// A read fetched through the broker for this session, if still fresh.
+pub(crate) fn cached_read<T: serde::de::DeserializeOwned>(
+    state: &crate::state::AppState,
+    jar: &axum_extra::extract::PrivateCookieJar,
+    query: vega_web::admin_read::ReadQuery,
+) -> Option<T> {
+    let cookie = jar.get(crate::state::SESSION_COOKIE)?;
+    let json = state
+        .sessions
+        .cached_read(cookie.value(), query.key(), READ_MAX_AGE)?;
+    serde_json::from_str(&json).ok()
+}
+
+impl Actions {
+    /// The notice offering to fetch an administrative read with the user's
+    /// password, or the plain explanation when the broker is not configured.
+    pub(crate) fn unlock(&self, query: vega_web::admin_read::ReadQuery, context: &str) -> String {
+        let button = self.button(
+            "Desbloquear com senha",
+            &format!("read-{}", query.key()),
+            &[],
+        );
+        if button.is_empty() {
+            return format!(
+                r#"<div class="notice warn"><strong>{context}</strong><span>Esta leitura exige autorização de administrador e o broker administrativo não está configurado nesta instalação.</span></div>"#
+            );
+        }
+        format!(
+            r#"<div class="notice"><strong>{context}</strong><span>Esta leitura exige autorização de administrador. Confirme com sua senha para lê-la com a sua identidade; o resultado fica disponível por cinco minutos.</span>{button}</div>"#
+        )
+    }
+}
+
 pub(crate) fn render_with(
     title: &str,
     active_href: &str,
