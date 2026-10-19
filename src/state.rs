@@ -59,6 +59,9 @@ pub struct Session {
     created_at: Instant,
     last_seen: Instant,
     expires: watch::Sender<Instant>,
+    /// Administrative reads fetched through the broker with the user's
+    /// identity, keyed by `ReadQuery::key`, with the time they were fetched.
+    reads: HashMap<String, (Instant, String)>,
 }
 
 impl Session {
@@ -74,6 +77,7 @@ impl Session {
             created_at: now,
             last_seen: now,
             expires: watch::channel(now).0,
+            reads: HashMap::new(),
         }
     }
 
@@ -129,6 +133,31 @@ impl SessionStore {
             values: HashMap::new(),
             policy,
         })))
+    }
+
+    /// Keeps one administrative read for the session; nothing is stored when
+    /// the session is gone.
+    pub fn store_read(&self, token: &str, key: &str, json: String) {
+        let mut store = self.0.lock().unwrap();
+        if let Some(session) = store.values.get_mut(token) {
+            session.reads.insert(key.to_owned(), (Instant::now(), json));
+        }
+    }
+
+    /// Drops every administrative read of the session; called after a change
+    /// so pages never show a copy taken before it.
+    pub fn clear_reads(&self, token: &str) {
+        let mut store = self.0.lock().unwrap();
+        if let Some(session) = store.values.get_mut(token) {
+            session.reads.clear();
+        }
+    }
+
+    /// A read fetched less than `max_age` ago, if any.
+    pub fn cached_read(&self, token: &str, key: &str, max_age: Duration) -> Option<String> {
+        let store = self.0.lock().unwrap();
+        let (at, json) = store.values.get(token)?.reads.get(key)?;
+        (at.elapsed() < max_age).then(|| json.clone())
     }
 
     pub fn insert(&self, token: String, session: Session) {
@@ -296,6 +325,53 @@ impl LoginLimiter {
     }
 }
 
+/// One line of the activity shown on the overview: who did what, from where,
+/// and when (local wall clock). Kept in memory, newest first, bounded.
+#[derive(Clone, Debug)]
+pub struct AuditEntry {
+    pub when: String,
+    pub user: String,
+    pub address: String,
+    pub text: String,
+}
+
+#[derive(Clone, Default)]
+pub struct AuditLog(Arc<Mutex<std::collections::VecDeque<AuditEntry>>>);
+
+impl AuditLog {
+    const LIMIT: usize = 40;
+
+    pub fn record(&self, user: &str, address: &str, text: impl Into<String>) {
+        let entry = AuditEntry {
+            when: local_clock(),
+            user: user.to_owned(),
+            address: address.to_owned(),
+            text: text.into(),
+        };
+        let mut log = self.0.lock().unwrap();
+        log.push_front(entry);
+        log.truncate(Self::LIMIT);
+    }
+
+    pub fn recent(&self, limit: usize) -> Vec<AuditEntry> {
+        self.0.lock().unwrap().iter().take(limit).cloned().collect()
+    }
+}
+
+/// "HH:MM" in the host's local time zone, without pulling a time-zone crate.
+fn local_clock() -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as libc::time_t)
+        .unwrap_or(0);
+    let mut tm: libc::tm = unsafe { std::mem::zeroed() };
+    // SAFETY: localtime_r writes only into the tm we own; both pointers are valid.
+    if unsafe { libc::localtime_r(&now, &mut tm) }.is_null() {
+        return String::new();
+    }
+    format!("{:02}:{:02}", tm.tm_hour, tm.tm_min)
+}
+
 #[derive(Clone)]
 pub struct AppState {
     pub nvidia_jobs: crate::pages::nvidia::Jobs,
@@ -309,6 +385,7 @@ pub struct AppState {
     pub terminal_slots: Arc<Semaphore>,
     pub terminal_socket: String,
     pub admin_socket: Option<String>,
+    pub audit: AuditLog,
 }
 
 impl FromRef<AppState> for Key {

@@ -37,8 +37,13 @@ impl Authenticator for PamAuthenticator {
 
 /// Extractor injetado pelo middleware `require_session` nas rotas
 /// protegidas: se um handler o recebe, a sessão já foi validada.
-#[derive(Clone)]
-pub struct CurrentUser(pub String);
+/// The authenticated viewer of a page: account name and the address the
+/// session came from (shown in the sidebar and recorded in the activity log).
+#[derive(Clone, Debug)]
+pub struct CurrentUser {
+    pub name: String,
+    pub address: String,
+}
 
 pub async fn require_session(
     State(state): State<AppState>,
@@ -52,7 +57,15 @@ pub async fn require_session(
 
     match username {
         Some(username) => {
-            req.extensions_mut().insert(CurrentUser(username));
+            let address = req
+                .extensions()
+                .get::<ConnectInfo<SocketAddr>>()
+                .map(|info| info.0.ip().to_string())
+                .unwrap_or_default();
+            req.extensions_mut().insert(CurrentUser {
+                name: username,
+                address,
+            });
             next.run(req).await
         }
         None => (
@@ -190,6 +203,7 @@ pub async fn login_submit(
         Ok(Ok(())) => {
             state.login_limiter.success(&ip, &username);
             eprintln!("vega-web: login bem-sucedido ip={ip} usuário={username:?}");
+            state.audit.record(&username, &ip, "Entrada no painel");
             let token = new_session_token();
             state
                 .sessions

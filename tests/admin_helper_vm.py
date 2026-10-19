@@ -100,6 +100,12 @@ def commit(stream, grant, extra=b''):
     if read_exact(stream, 1) != b'\x00':
         return None
     value = struct.unpack('>I', read_exact(stream, 4))[0]
+    # The result frame carries a bounded payload (JSON for administrative
+    # reads, empty for every other operation) before the broker closes.
+    length = struct.unpack('>I', read_exact(stream, 4))[0]
+    assert length <= 1 << 20
+    if length:
+        read_exact(stream, length)
     assert stream.recv(1) == b''
     return value
 

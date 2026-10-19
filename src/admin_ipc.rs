@@ -7,92 +7,407 @@ use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use zeroize::Zeroizing;
 
+use crate::admin_read::{MAX_PAYLOAD, ReadQuery};
+
 pub const REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 pub const GRANT_TIMEOUT: Duration = Duration::from_secs(10);
 pub const CLIENT_TIMEOUT: Duration = Duration::from_secs(70);
 const MAGIC: &[u8; 4] = b"VWA1";
 const COMMIT: &[u8; 4] = b"VWC1";
-const MAX_OPERATION: usize = 201;
+// Longest operation frame: one code byte, one flag byte and a 200-byte name.
+const MAX_OPERATION: usize = 202;
+const MAX_NAME: usize = 200;
 
+/// One administrative operation, authorized by the user's own password through
+/// the root broker and executed by vegad with the user's identity. Each variant
+/// maps to exactly one polkit action; the wire encoding is a code byte followed
+/// by fixed fields, with no free-form parsing on the privileged side.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Operation {
     InstallNative(String),
     InstallNvidia,
-    AddPort { port: u16, tcp: bool },
+    AddPort {
+        port: u16,
+        tcp: bool,
+    },
+    RemovePort {
+        port: u16,
+        tcp: bool,
+    },
+    FirewallService {
+        name: String,
+        enabled: bool,
+    },
+    ServiceEnabled {
+        name: String,
+        enabled: bool,
+    },
+    ServiceRunning {
+        name: String,
+        running: bool,
+    },
+    ServiceRestart(String),
+    UpdateAllNative,
+    RemoveNative(String),
+    RepoEnabled {
+        name: String,
+        enabled: bool,
+    },
+    ClearNativeCache,
+    SetAdmin {
+        username: String,
+        admin: bool,
+    },
+    DateTime {
+        timezone: String,
+        ntp: bool,
+    },
+    /// An administrative read, answered with a JSON payload.
+    Read(ReadQuery),
 }
 
 fn invalid() -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, "invalid administrative frame")
 }
 
+fn checked_name(name: &str, extra: &[u8]) -> io::Result<String> {
+    if name.is_empty()
+        || name.len() > MAX_NAME
+        || !name.as_bytes()[0].is_ascii_alphanumeric()
+        || !name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || extra.contains(&byte))
+    {
+        return Err(invalid());
+    }
+    Ok(name.to_owned())
+}
+
+fn flag(value: &str) -> io::Result<bool> {
+    match value {
+        "true" => Ok(true),
+        "false" => Ok(false),
+        _ => Err(invalid()),
+    }
+}
+
+fn port_number(port: &str, protocol: &str) -> io::Result<(u16, bool)> {
+    if port.is_empty() || !port.bytes().all(|byte| byte.is_ascii_digit()) {
+        return Err(invalid());
+    }
+    let port: u16 = port.parse().map_err(|_| invalid())?;
+    if port == 0 || !matches!(protocol, "tcp" | "udp") {
+        return Err(invalid());
+    }
+    Ok((port, protocol == "tcp"))
+}
+
 impl Operation {
+    /// Native package names: RPM names such as `libstdc++6` or `python3.12`.
     pub fn install(name: &str) -> io::Result<Self> {
-        if name.is_empty()
-            || name.len() > 200
-            || !name.as_bytes()[0].is_ascii_alphanumeric()
-            || !name
-                .bytes()
-                .all(|byte| byte.is_ascii_alphanumeric() || b"+_.-".contains(&byte))
-        {
-            return Err(invalid());
-        }
-        Ok(Self::InstallNative(name.to_owned()))
+        Ok(Self::InstallNative(checked_name(name, b"+_.-")?))
+    }
+
+    pub fn remove(name: &str) -> io::Result<Self> {
+        Ok(Self::RemoveNative(checked_name(name, b"+_.-")?))
     }
 
     pub fn port(port: &str, protocol: &str) -> io::Result<Self> {
-        if port.is_empty() || !port.bytes().all(|byte| byte.is_ascii_digit()) {
+        let (port, tcp) = port_number(port, protocol)?;
+        Ok(Self::AddPort { port, tcp })
+    }
+
+    pub fn remove_port(port: &str, protocol: &str) -> io::Result<Self> {
+        let (port, tcp) = port_number(port, protocol)?;
+        Ok(Self::RemovePort { port, tcp })
+    }
+
+    /// firewalld service ids such as `ssh` or `dhcpv6-client`.
+    pub fn firewall_service(name: &str, enabled: &str) -> io::Result<Self> {
+        Ok(Self::FirewallService {
+            name: checked_name(name, b"_-")?,
+            enabled: flag(enabled)?,
+        })
+    }
+
+    /// systemd unit names such as `sshd.service` or `getty@tty1.service`.
+    fn unit(name: &str) -> io::Result<String> {
+        let name = checked_name(name, b"@_.:\\-")?;
+        if !name.ends_with(".service") {
             return Err(invalid());
         }
-        let port: u16 = port.parse().map_err(|_| invalid())?;
-        if port == 0 || !matches!(protocol, "tcp" | "udp") {
+        Ok(name)
+    }
+
+    pub fn service_enabled(name: &str, enabled: &str) -> io::Result<Self> {
+        Ok(Self::ServiceEnabled {
+            name: Self::unit(name)?,
+            enabled: flag(enabled)?,
+        })
+    }
+
+    pub fn service_running(name: &str, running: &str) -> io::Result<Self> {
+        Ok(Self::ServiceRunning {
+            name: Self::unit(name)?,
+            running: flag(running)?,
+        })
+    }
+
+    pub fn service_restart(name: &str) -> io::Result<Self> {
+        Ok(Self::ServiceRestart(Self::unit(name)?))
+    }
+
+    /// Zypper repository aliases such as `repo-oss` or `home:user:project`.
+    pub fn repo_enabled(name: &str, enabled: &str) -> io::Result<Self> {
+        Ok(Self::RepoEnabled {
+            name: checked_name(name, b"+_.:-")?,
+            enabled: flag(enabled)?,
+        })
+    }
+
+    /// POSIX account names; root and the service account are refused by the
+    /// broker and by vegad, this only bounds the frame.
+    pub fn set_admin(username: &str, admin: &str) -> io::Result<Self> {
+        if username.len() > 32 || !username.as_bytes()[0].is_ascii_lowercase() {
             return Err(invalid());
         }
-        Ok(Self::AddPort {
-            port,
-            tcp: protocol == "tcp",
+        Ok(Self::SetAdmin {
+            username: checked_name(username, b"_.-")?,
+            admin: flag(admin)?,
+        })
+    }
+
+    /// IANA zone names such as `America/Sao_Paulo`, `UTC` or `Etc/GMT+3`.
+    pub fn datetime(timezone: &str, ntp: &str) -> io::Result<Self> {
+        let timezone = checked_name(timezone, b"/_+-")?;
+        if timezone.len() > 100 || timezone.contains("//") || timezone.ends_with('/') {
+            return Err(invalid());
+        }
+        Ok(Self::DateTime {
+            timezone,
+            ntp: flag(ntp)?,
         })
     }
 
     pub fn action_id(&self) -> &'static str {
         match self {
             Self::InstallNative(_) | Self::InstallNvidia => "org.lyraos.vega.software.install",
-            Self::AddPort { .. } => "org.lyraos.vega.firewall.configure",
+            Self::UpdateAllNative => "org.lyraos.vega.software.update",
+            Self::RemoveNative(_) => "org.lyraos.vega.software.remove",
+            Self::RepoEnabled { .. } => "org.lyraos.vega.software.manage-repos",
+            Self::ClearNativeCache => "org.lyraos.vega.software.clear-cache",
+            Self::AddPort { .. } | Self::RemovePort { .. } | Self::FirewallService { .. } => {
+                "org.lyraos.vega.firewall.configure"
+            }
+            Self::ServiceEnabled { .. } | Self::ServiceRunning { .. } | Self::ServiceRestart(_) => {
+                "org.lyraos.vega.services.configure"
+            }
+            Self::SetAdmin { .. } => "org.lyraos.vega.users.manage",
+            Self::DateTime { .. } => "org.lyraos.vega.system.configure",
+            Self::Read(query) => query.action_id(),
+        }
+    }
+
+    /// Page the operation belongs to; the confirmation and result pages link back to it.
+    pub fn return_href(&self) -> &'static str {
+        match self {
+            Self::InstallNative(_)
+            | Self::UpdateAllNative
+            | Self::RemoveNative(_)
+            | Self::RepoEnabled { .. }
+            | Self::ClearNativeCache => "/software",
+            Self::InstallNvidia => "/hardware/nvidia",
+            Self::AddPort { .. } | Self::RemovePort { .. } | Self::FirewallService { .. } => {
+                "/rede"
+            }
+            Self::ServiceEnabled { .. } | Self::ServiceRunning { .. } | Self::ServiceRestart(_) => {
+                "/servicos"
+            }
+            Self::SetAdmin { .. } => "/usuarios",
+            Self::DateTime { .. } => "/data-hora",
+            Self::Read(query) => query.return_href(),
+        }
+    }
+
+    /// Human description (pt-BR) for the confirmation dialog and the result page.
+    pub fn describe(&self) -> String {
+        let proto = |tcp: &bool| if *tcp { "tcp" } else { "udp" };
+        match self {
+            Self::InstallNative(name) => format!("Instalar o pacote {name}"),
+            Self::InstallNvidia => "Instalar o driver NVIDIA oficial".to_owned(),
+            Self::AddPort { port, tcp } => {
+                format!("Abrir a porta {port}/{} no firewall", proto(tcp))
+            }
+            Self::RemovePort { port, tcp } => {
+                format!("Fechar a porta {port}/{} no firewall", proto(tcp))
+            }
+            Self::FirewallService {
+                name,
+                enabled: true,
+            } => {
+                format!("Permitir o serviço {name} no firewall")
+            }
+            Self::FirewallService {
+                name,
+                enabled: false,
+            } => {
+                format!("Bloquear o serviço {name} no firewall")
+            }
+            Self::ServiceEnabled {
+                name,
+                enabled: true,
+            } => {
+                format!("Habilitar {name} na inicialização")
+            }
+            Self::ServiceEnabled {
+                name,
+                enabled: false,
+            } => {
+                format!("Desabilitar {name} na inicialização")
+            }
+            Self::ServiceRunning {
+                name,
+                running: true,
+            } => format!("Iniciar {name}"),
+            Self::ServiceRunning {
+                name,
+                running: false,
+            } => format!("Parar {name}"),
+            Self::ServiceRestart(name) => format!("Reiniciar {name}"),
+            Self::UpdateAllNative => "Aplicar todas as atualizações disponíveis".to_owned(),
+            Self::RemoveNative(name) => format!("Remover o pacote {name}"),
+            Self::RepoEnabled {
+                name,
+                enabled: true,
+            } => format!("Habilitar o repositório {name}"),
+            Self::RepoEnabled {
+                name,
+                enabled: false,
+            } => {
+                format!("Desabilitar o repositório {name}")
+            }
+            Self::ClearNativeCache => "Limpar o cache de pacotes".to_owned(),
+            Self::SetAdmin {
+                username,
+                admin: true,
+            } => {
+                format!("Tornar {username} administrador")
+            }
+            Self::SetAdmin {
+                username,
+                admin: false,
+            } => {
+                format!("Retirar {username} dos administradores")
+            }
+            Self::DateTime { timezone, ntp } => format!(
+                "Definir o fuso horário {timezone} e {} a sincronização automática (NTP)",
+                if *ntp { "ativar" } else { "desativar" }
+            ),
+            Self::Read(query) => query.describe().to_owned(),
         }
     }
 
     pub fn encode(&self) -> io::Result<Vec<u8>> {
+        let named = |code: u8, flag: Option<bool>, name: &str| {
+            let mut bytes = vec![code];
+            if let Some(flag) = flag {
+                bytes.push(u8::from(flag));
+            }
+            bytes.extend_from_slice(name.as_bytes());
+            Ok(bytes)
+        };
         match self {
             Self::InstallNvidia => Ok(vec![3]),
             Self::InstallNative(name) => {
                 Self::install(name)?;
-                let mut bytes = vec![1];
-                bytes.extend_from_slice(name.as_bytes());
-                Ok(bytes)
+                named(1, None, name)
             }
-            Self::AddPort { port, tcp } if *port > 0 => {
-                let mut bytes = vec![2];
+            Self::AddPort { port, tcp } | Self::RemovePort { port, tcp } if *port > 0 => {
+                let mut bytes = vec![if matches!(self, Self::AddPort { .. }) {
+                    2
+                } else {
+                    4
+                }];
                 bytes.extend_from_slice(&port.to_be_bytes());
                 bytes.push(u8::from(*tcp));
                 Ok(bytes)
+            }
+            Self::FirewallService { name, enabled } => {
+                Self::firewall_service(name, "true")?;
+                named(5, Some(*enabled), name)
+            }
+            Self::ServiceEnabled { name, enabled } => {
+                Self::unit(name)?;
+                named(6, Some(*enabled), name)
+            }
+            Self::ServiceRunning { name, running } => {
+                Self::unit(name)?;
+                named(7, Some(*running), name)
+            }
+            Self::ServiceRestart(name) => {
+                Self::unit(name)?;
+                named(8, None, name)
+            }
+            Self::UpdateAllNative => Ok(vec![9]),
+            Self::RemoveNative(name) => {
+                Self::remove(name)?;
+                named(10, None, name)
+            }
+            Self::RepoEnabled { name, enabled } => {
+                Self::repo_enabled(name, "true")?;
+                named(11, Some(*enabled), name)
+            }
+            Self::ClearNativeCache => Ok(vec![12]),
+            Self::Read(query) => Ok(vec![query.code()]),
+            Self::SetAdmin { username, admin } => {
+                Self::set_admin(username, "true")?;
+                named(13, Some(*admin), username)
+            }
+            Self::DateTime { timezone, ntp } => {
+                Self::datetime(timezone, "true")?;
+                named(14, Some(*ntp), timezone)
             }
             _ => Err(invalid()),
         }
     }
 
     pub fn decode(bytes: &[u8]) -> io::Result<Self> {
+        fn text(bytes: &[u8]) -> io::Result<&str> {
+            std::str::from_utf8(bytes).map_err(|_| invalid())
+        }
+        let flag_text = |flag: &u8| match flag {
+            0 => Ok("false"),
+            1 => Ok("true"),
+            _ => Err(invalid()),
+        };
         match bytes {
             [3] => Ok(Self::InstallNvidia),
-            [1, name @ ..] => Self::install(std::str::from_utf8(name).map_err(|_| invalid())?),
-            [2, high, low, tcp @ (0 | 1)] => {
+            [9] => Ok(Self::UpdateAllNative),
+            [12] => Ok(Self::ClearNativeCache),
+            [code @ 20..=24] => ReadQuery::from_code(*code)
+                .map(Self::Read)
+                .ok_or_else(invalid),
+            [1, name @ ..] => Self::install(text(name)?),
+            [10, name @ ..] => Self::remove(text(name)?),
+            [8, name @ ..] => Self::service_restart(text(name)?),
+            [code @ (2 | 4), high, low, tcp @ (0 | 1)] => {
                 let port = u16::from_be_bytes([*high, *low]);
                 if port == 0 {
                     return Err(invalid());
                 }
-                Ok(Self::AddPort {
-                    port,
-                    tcp: *tcp == 1,
+                let tcp = *tcp == 1;
+                Ok(if *code == 2 {
+                    Self::AddPort { port, tcp }
+                } else {
+                    Self::RemovePort { port, tcp }
                 })
             }
+            [5, flag, name @ ..] => Self::firewall_service(text(name)?, flag_text(flag)?),
+            [6, flag, name @ ..] => Self::service_enabled(text(name)?, flag_text(flag)?),
+            [7, flag, name @ ..] => Self::service_running(text(name)?, flag_text(flag)?),
+            [11, flag, name @ ..] => Self::repo_enabled(text(name)?, flag_text(flag)?),
+            [13, flag, name @ ..] => Self::set_admin(text(name)?, flag_text(flag)?),
+            [14, flag, name @ ..] => Self::datetime(text(name)?, flag_text(flag)?),
             _ => Err(invalid()),
         }
     }
@@ -197,13 +512,19 @@ pub fn write_prepared(
     writer.write_all(audit)
 }
 
-pub fn write_result(writer: &mut impl Write, transaction: u32) -> io::Result<()> {
+pub fn write_result(writer: &mut impl Write, transaction: u32, payload: &[u8]) -> io::Result<()> {
+    if payload.len() > MAX_PAYLOAD {
+        return Err(invalid());
+    }
     writer.write_all(&[0])?;
-    writer.write_all(&transaction.to_be_bytes())
+    writer.write_all(&transaction.to_be_bytes())?;
+    writer.write_all(&(payload.len() as u32).to_be_bytes())?;
+    writer.write_all(payload)
 }
 
 pub struct Completed {
     pub transaction: u32,
+    pub payload: Vec<u8>,
     pub audit_id: String,
 }
 
@@ -243,11 +564,18 @@ pub async fn execute(path: &Path, request: Request) -> io::Result<Completed> {
             return Err(io::Error::other("operation rejected or failed"));
         }
         let transaction = socket.read_u32().await?;
+        let length = socket.read_u32().await? as usize;
+        if length > MAX_PAYLOAD {
+            return Err(invalid());
+        }
+        let mut payload = vec![0u8; length];
+        socket.read_exact(&mut payload).await?;
         if socket.read(&mut [0]).await? != 0 {
             return Err(invalid());
         }
         Ok(Completed {
             transaction,
+            payload,
             audit_id: audit.iter().map(|byte| format!("{byte:02x}")).collect(),
         })
     })
@@ -324,6 +652,66 @@ mod tests {
             ("1", "sctp"),
         ] {
             assert!(Operation::port(port, protocol).is_err());
+        }
+    }
+
+    #[test]
+    fn every_operation_round_trips_with_its_action_and_rejects_forged_parameters() {
+        let operations = [
+            Operation::remove_port("8443", "udp").unwrap(),
+            Operation::firewall_service("ssh", "true").unwrap(),
+            Operation::firewall_service("dhcpv6-client", "false").unwrap(),
+            Operation::service_enabled("sshd.service", "false").unwrap(),
+            Operation::service_running("vega-web.service", "true").unwrap(),
+            Operation::service_restart("getty@tty1.service").unwrap(),
+            Operation::UpdateAllNative,
+            Operation::remove("libstdc++6").unwrap(),
+            Operation::repo_enabled("repo-oss", "false").unwrap(),
+            Operation::repo_enabled("home:user:project", "true").unwrap(),
+            Operation::ClearNativeCache,
+            Operation::set_admin("rbrito", "true").unwrap(),
+            Operation::datetime("America/Sao_Paulo", "true").unwrap(),
+            Operation::datetime("UTC", "false").unwrap(),
+            Operation::datetime("Etc/GMT+3", "true").unwrap(),
+            Operation::Read(ReadQuery::KernelBoot),
+            Operation::Read(ReadQuery::Firewall),
+        ];
+        for operation in operations {
+            let encoded = operation.encode().unwrap();
+            assert!(encoded.len() <= MAX_OPERATION, "{operation:?}");
+            assert_eq!(Operation::decode(&encoded).unwrap(), operation);
+            assert!(operation.action_id().starts_with("org.lyraos.vega."));
+            assert!(operation.return_href().starts_with('/'));
+            assert!(!operation.describe().is_empty());
+            let frame = encode_request(&request(operation.clone())).unwrap();
+            assert_eq!(
+                read_request(&mut frame.as_slice()).unwrap().operation,
+                operation
+            );
+        }
+        assert!(
+            Operation::service_restart("sshd").is_err(),
+            "unit suffix required"
+        );
+        assert!(Operation::service_restart("../etc.service").is_err());
+        assert!(Operation::service_running("sshd.service", "yes").is_err());
+        assert!(Operation::firewall_service("ssh;rm", "true").is_err());
+        assert!(Operation::repo_enabled("repo oss", "true").is_err());
+        assert!(Operation::set_admin("Root", "true").is_err());
+        assert!(Operation::set_admin("a-very-long-user-name-beyond-posix-limits", "true").is_err());
+        assert!(Operation::datetime("America//Sao_Paulo", "true").is_err());
+        assert!(Operation::datetime("../zoneinfo", "true").is_err());
+        assert!(Operation::remove_port("0", "tcp").is_err());
+        for forged in [
+            &[5u8, 2, b's'][..],
+            &[6, 1][..],
+            &[14, 1][..],
+            &[13, 0, b'R'][..],
+            &[15][..],
+            &[25][..],
+            &[20, 0][..],
+        ] {
+            assert!(Operation::decode(forged).is_err(), "{forged:?}");
         }
     }
 

@@ -23,7 +23,7 @@ const XTERM_CSS: &str = include_str!("../../assets/xterm/xterm.css");
 pub async fn handler(
     State(state): State<AppState>,
     jar: PrivateCookieJar,
-    Extension(CurrentUser(username)): Extension<CurrentUser>,
+    Extension(user): Extension<CurrentUser>,
 ) -> Response {
     let token = jar
         .get(SESSION_COOKIE)
@@ -35,7 +35,7 @@ pub async fn handler(
 <label>Senha<br><input type="password" name="password" autocomplete="current-password" required autofocus></label>
 <button type="submit">Abrir terminal</button>
 </form>"#;
-        return render("Terminal", "/terminal", &username, body.to_string()).into_response();
+        return render("Terminal", "/terminal", &user, body.to_string()).into_response();
     }
     let body = r#"
 <p>Shell completo do servidor. O acesso é permitido somente a administradores do grupo <code>wheel</code>.</p>
@@ -81,7 +81,7 @@ pub async fn handler(
   terminal.onData(data => { if (socket.readyState === WebSocket.OPEN) socket.send(new TextEncoder().encode(data)); });
 })();
 </script>"#;
-    render("Terminal", "/terminal", &username, body.to_string()).into_response()
+    render("Terminal", "/terminal", &user, body.to_string()).into_response()
 }
 
 #[derive(Deserialize)]
@@ -93,9 +93,10 @@ pub async fn reauthenticate(
     State(state): State<AppState>,
     ConnectInfo(remote): ConnectInfo<SocketAddr>,
     jar: PrivateCookieJar,
-    Extension(CurrentUser(username)): Extension<CurrentUser>,
+    Extension(user): Extension<CurrentUser>,
     Form(form): Form<ReauthRequest>,
 ) -> Response {
+    let username = user.name.clone();
     let token = match jar.get(SESSION_COOKIE) {
         Some(cookie) => cookie.value().to_string(),
         None => return Redirect::to("/login").into_response(),
@@ -133,7 +134,7 @@ pub async fn reauthenticate(
         tokio::time::sleep(delay).await;
         let body = r#"<p class="error">Senha inválida.</p><p>O terminal não foi aberto.</p>
 <form method="post" action="/terminal"><label>Senha<br><input type="password" name="password" autocomplete="current-password" required autofocus></label><button type="submit">Tentar novamente</button></form>"#;
-        render("Terminal", "/terminal", &username, body.to_string()).into_response()
+        render("Terminal", "/terminal", &user, body.to_string()).into_response()
     }
 }
 

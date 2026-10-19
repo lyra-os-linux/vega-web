@@ -94,6 +94,7 @@ async fn exercise_session(scenario: &str) {
         terminal_grants: grants.clone(),
         terminal_slots: slots.clone(),
         admin_socket: None,
+        audit: Default::default(),
         terminal_socket: path.to_str().unwrap().into(),
     };
     let router = Router::new()

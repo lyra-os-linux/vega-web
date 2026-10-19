@@ -5,7 +5,10 @@ mod admin_polkit;
 #[path = "../pam_ffi.rs"]
 mod pam_ffi;
 
-use lyra_vega_dbus::{FirewallClient, SoftwareClient, VegaDbus};
+use lyra_vega_dbus::{
+    BackupClient, DateTimeClient, FirewallClient, KernelClient, LogsClient, ServicesClient,
+    SnapshotsClient, SoftwareClient, UsersClient, VegaDbus,
+};
 use rand::RngExt;
 use std::ffi::{CStr, CString};
 use std::io::{self, Read, Write};
@@ -15,6 +18,7 @@ use std::process::Stdio;
 use std::ptr;
 use std::time::Duration;
 use vega_web::admin_ipc::{self, Operation};
+use vega_web::admin_read::{self, ReadQuery};
 use vega_web::auth_ipc::{self, DeadlineStream};
 use zeroize::Zeroizing;
 
@@ -160,10 +164,13 @@ fn broker() -> Result<()> {
         );
         drop(request);
         drop(grant);
-        let transaction = start_worker(&user, &operation, &audit_id)?;
-        eprintln!("vega-web-admin: id={audit_id} phase=accepted transaction={transaction}");
+        let (transaction, payload) = start_worker(&user, &operation, &audit_id)?;
+        eprintln!(
+            "vega-web-admin: id={audit_id} phase=accepted transaction={transaction} payload={}",
+            payload.len()
+        );
         let mut output = DeadlineStream::new(output.into_inner(), admin_ipc::REQUEST_TIMEOUT);
-        if admin_ipc::write_result(&mut output, transaction).is_err() {
+        if admin_ipc::write_result(&mut output, transaction, &payload).is_err() {
             eprintln!(
                 "vega-web-admin: id={audit_id} phase=response-undelivered transaction={transaction}"
             );
@@ -184,14 +191,14 @@ fn broker() -> Result<()> {
     outcome.map(|_| ())
 }
 
-fn start_worker(user: &Account, operation: &Operation, audit: &str) -> Result<u32> {
+fn start_worker(user: &Account, operation: &Operation, audit: &str) -> Result<(u32, Vec<u8>)> {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?;
     runtime.block_on(run_worker(user, operation, audit))
 }
 
-async fn run_worker(user: &Account, operation: &Operation, audit: &str) -> Result<u32> {
+async fn run_worker(user: &Account, operation: &Operation, audit: &str) -> Result<(u32, Vec<u8>)> {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     // Exec while still root, then drop identity inside the fresh process.
     // Exec after setuid would reset dumpability and expose a privileged caller
@@ -228,12 +235,21 @@ async fn run_worker(user: &Account, operation: &Operation, audit: &str) -> Resul
     .await??;
     let outcome = tokio::time::timeout(Duration::from_secs(30), async {
         input.write_all(&[3]).await?;
-        let mut result = [0u8; 5];
-        output.read_exact(&mut result).await?;
-        if result[0] != 0 {
+        let mut status = [0u8; 1];
+        output.read_exact(&mut status).await?;
+        if status[0] != 0 {
             return Err("worker rejected or failed".into());
         }
-        Ok::<_, Box<dyn std::error::Error>>(u32::from_be_bytes(result[1..].try_into()?))
+        let mut header = [0u8; 8];
+        output.read_exact(&mut header).await?;
+        let transaction = u32::from_be_bytes(header[..4].try_into()?);
+        let length = u32::from_be_bytes(header[4..].try_into()?) as usize;
+        if length > admin_read::MAX_PAYLOAD {
+            return Err("worker payload too large".into());
+        }
+        let mut payload = vec![0u8; length];
+        output.read_exact(&mut payload).await?;
+        Ok::<_, Box<dyn std::error::Error>>((transaction, payload))
     })
     .await;
     let _ = tokio::time::timeout(
@@ -254,11 +270,96 @@ async fn run_worker(user: &Account, operation: &Operation, audit: &str) -> Resul
     Ok(transaction)
 }
 
+/// The read side: the same typed clients the pages use, now with the user's
+/// identity, serialized for the panel to keep in the session.
+async fn read_payload(dbus: &VegaDbus, query: ReadQuery) -> Result<Vec<u8>> {
+    let json = match query {
+        ReadQuery::KernelBoot => {
+            let kernel = dbus.kernel();
+            let status = kernel.boot_status().await?;
+            let entries = kernel.list_boot_entries().await.unwrap_or_default();
+            serde_json::to_vec(&admin_read::KernelBoot {
+                loader: status.loader,
+                default_entry: status.default_entry,
+                timeout: status.timeout,
+                cmdline: status.cmdline,
+                entries,
+            })?
+        }
+        ReadQuery::BackupConfigs => {
+            let configs = dbus.backup().list_configs().await?;
+            serde_json::to_vec(&admin_read::BackupConfigs {
+                configs: configs
+                    .into_iter()
+                    .map(|config| admin_read::BackupConfig {
+                        id: config.id,
+                        paths: config.paths,
+                        destination: config.destination,
+                        frequency: config.frequency,
+                    })
+                    .collect(),
+            })?
+        }
+        ReadQuery::Snapshots => {
+            let client = dbus.snapshots();
+            let available = client.available().await?;
+            let snapshots = if available {
+                client
+                    .list()
+                    .await?
+                    .into_iter()
+                    .map(|snapshot| admin_read::Snapshot {
+                        id: snapshot.id,
+                        timestamp: snapshot.timestamp,
+                        trigger: snapshot.trigger,
+                        description: snapshot.description,
+                    })
+                    .collect()
+            } else {
+                Vec::new()
+            };
+            serde_json::to_vec(&admin_read::Snapshots {
+                available,
+                snapshots,
+            })?
+        }
+        ReadQuery::LogUnits => serde_json::to_vec(&admin_read::LogUnits {
+            units: dbus.logs().list_units().await?,
+        })?,
+        ReadQuery::Firewall => {
+            let firewall = dbus.firewall();
+            let services = firewall.services().await?;
+            let ports = firewall.ports().await?;
+            serde_json::to_vec(&admin_read::Firewall {
+                services: services
+                    .into_iter()
+                    .map(|service| admin_read::FirewallService {
+                        name: service.name,
+                        label: service.label,
+                        enabled: service.enabled,
+                    })
+                    .collect(),
+                ports: ports
+                    .into_iter()
+                    .map(|port| admin_read::FirewallPort {
+                        port: port.port,
+                        protocol: port.protocol,
+                    })
+                    .collect(),
+            })?
+        }
+    };
+    if json.len() > admin_read::MAX_PAYLOAD {
+        return Err("read payload too large".into());
+    }
+    Ok(json)
+}
+
 fn worker() -> Result<()> {
     let mut length = [0u8; 2];
     io::stdin().read_exact(&mut length)?;
     let length = u16::from_be_bytes(length) as usize;
-    if !(8..=463).contains(&length) {
+    if !(8..=464).contains(&length) {
         return Err("invalid worker request".into());
     }
     let mut frame = vec![0u8; length];
@@ -286,7 +387,7 @@ fn worker() -> Result<()> {
     let runtime = tokio::runtime::Builder::new_current_thread()
         .enable_all()
         .build()?;
-    let transaction = runtime.block_on(async {
+    let (transaction, payload) = runtime.block_on(async {
         tokio::time::timeout(Duration::from_secs(30), async {
             let dbus = VegaDbus::connect().await?;
             io::stdout().write_all(&[2])?;
@@ -297,21 +398,74 @@ fn worker() -> Result<()> {
                 return Err("worker not committed".into());
             }
             match operation {
-                Operation::InstallNvidia => Ok(dbus.software().install_nvidia(true).await?),
-                Operation::InstallNative(name) => Ok::<_, Box<dyn std::error::Error>>(
+                Operation::Read(query) => {
+                    Ok::<_, Box<dyn std::error::Error>>((0, read_payload(&dbus, query).await?))
+                }
+                Operation::InstallNvidia => {
+                    Ok((dbus.software().install_nvidia(true).await?, Vec::new()))
+                }
+                Operation::InstallNative(name) => Ok((
                     dbus.software().install("official", &name).await?,
-                ),
+                    Vec::new(),
+                )),
                 Operation::AddPort { port, tcp } => {
                     dbus.firewall()
                         .add_port(&port.to_string(), if tcp { "tcp" } else { "udp" })
                         .await?;
-                    Ok(0)
+                    Ok((0, Vec::new()))
+                }
+                Operation::RemovePort { port, tcp } => {
+                    dbus.firewall()
+                        .remove_port(&port.to_string(), if tcp { "tcp" } else { "udp" })
+                        .await?;
+                    Ok((0, Vec::new()))
+                }
+                Operation::FirewallService { name, enabled } => {
+                    dbus.firewall().set_service(&name, enabled).await?;
+                    Ok((0, Vec::new()))
+                }
+                Operation::ServiceEnabled { name, enabled } => {
+                    dbus.services().set_enabled(&name, enabled).await?;
+                    Ok((0, Vec::new()))
+                }
+                Operation::ServiceRunning { name, running } => {
+                    dbus.services().set_running(&name, running).await?;
+                    Ok((0, Vec::new()))
+                }
+                Operation::ServiceRestart(name) => {
+                    dbus.services().restart(&name).await?;
+                    Ok((0, Vec::new()))
+                }
+                Operation::UpdateAllNative => {
+                    Ok((dbus.software().update_all_native().await?, Vec::new()))
+                }
+                Operation::RemoveNative(name) => {
+                    Ok((dbus.software().remove("official", &name).await?, Vec::new()))
+                }
+                Operation::RepoEnabled { name, enabled } => {
+                    dbus.software().set_repo_enabled(&name, enabled).await?;
+                    Ok((0, Vec::new()))
+                }
+                Operation::ClearNativeCache => {
+                    Ok((dbus.software().clear_native_cache().await?, Vec::new()))
+                }
+                Operation::SetAdmin { username, admin } => {
+                    dbus.users().set_admin(&username, admin).await?;
+                    Ok((0, Vec::new()))
+                }
+                Operation::DateTime { timezone, ntp } => {
+                    let datetime = dbus.datetime();
+                    let current = datetime.status().await?;
+                    datetime
+                        .apply(&timezone, ntp, &current.locale, &current.keymap)
+                        .await?;
+                    Ok((0, Vec::new()))
                 }
             }
         })
         .await?
     })?;
-    admin_ipc::write_result(&mut io::stdout(), transaction)?;
+    admin_ipc::write_result(&mut io::stdout(), transaction, &payload)?;
     io::stdout().flush()?;
     if io::stdin().read(&mut [0])? != 0 {
         return Err("trailing worker command".into());

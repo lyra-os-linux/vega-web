@@ -73,6 +73,7 @@ async fn main() {
         admin_socket: std::env::var("VEGA_WEB_ADMIN_SOCKET")
             .ok()
             .filter(|path| !path.is_empty()),
+        audit: Default::default(),
     };
 
     let tls_config = tls::ensure_self_signed(
@@ -99,6 +100,10 @@ fn build_router(state: AppState) -> Router {
             get(pages::admin::handler)
                 .post(pages::admin::execute)
                 .layer(axum::extract::DefaultBodyLimit::max(8192)),
+        )
+        .route(
+            "/administracao/confirmar",
+            post(pages::admin::confirm).layer(axum::extract::DefaultBodyLimit::max(8192)),
         )
         .route("/", get(pages::dashboard::handler))
         .route(

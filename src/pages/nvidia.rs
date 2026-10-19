@@ -213,8 +213,8 @@ fn recovery_body(lang: Language, recovery: &RecoveryRow) -> String {
     body
 }
 
-fn response(username: &str, body: String) -> Response {
-    let mut response = render("NVIDIA", "/hardware", username, body).into_response();
+fn response(user: &CurrentUser, body: String) -> Response {
+    let mut response = render("NVIDIA", "/hardware", user, body).into_response();
     response
         .headers_mut()
         .insert(header::CACHE_CONTROL, "no-store".parse().unwrap());
@@ -227,10 +227,11 @@ fn response(username: &str, body: String) -> Response {
 pub async fn handler(
     State(state): State<AppState>,
     jar: PrivateCookieJar,
-    Extension(CurrentUser(username)): Extension<CurrentUser>,
+    Extension(user): Extension<CurrentUser>,
     Query(options): Query<Options>,
     headers: HeaderMap,
 ) -> Response {
+    let username = user.name.clone();
     let Some(lease) = jar
         .get(SESSION_COOKIE)
         .and_then(|c| state.sessions.lease(c.value(), Instant::now()))
@@ -277,7 +278,7 @@ pub async fn handler(
             }
         }
     }
-    response(&username, body)
+    response(&user, body)
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -428,9 +429,10 @@ impl Prepared {
 pub async fn progress(
     State(state): State<AppState>,
     jar: PrivateCookieJar,
-    Extension(CurrentUser(username)): Extension<CurrentUser>,
+    Extension(user): Extension<CurrentUser>,
     Path(id): Path<String>,
 ) -> Response {
+    let username = user.name.clone();
     let Some(lease) = jar
         .get(SESSION_COOKIE)
         .and_then(|c| state.sessions.lease(c.value(), Instant::now()))
@@ -488,7 +490,7 @@ pub async fn progress(
     {
         body.push_str(&recovery_body(lang, &recovery));
     }
-    let mut result = response(&username, body);
+    let mut result = response(&user, body);
     if job.phase == Phase::Running {
         result.headers_mut().insert("refresh", "3".parse().unwrap());
     }
