@@ -408,6 +408,9 @@ pub async fn execute(
                 }
                 return Redirect::to(query.return_href()).into_response();
             }
+            if let Some(cookie) = jar.get(SESSION_COOKIE) {
+                state.sessions.clear_reads(cookie.value());
+            }
             let (status, message) = match &operation {
                 Operation::InstallNvidia => unreachable!("NVIDIA uses its transaction observer"),
                 Operation::InstallNative(name) => (StatusCode::ACCEPTED, format!(

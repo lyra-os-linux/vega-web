@@ -144,6 +144,15 @@ impl SessionStore {
         }
     }
 
+    /// Drops every administrative read of the session; called after a change
+    /// so pages never show a copy taken before it.
+    pub fn clear_reads(&self, token: &str) {
+        let mut store = self.0.lock().unwrap();
+        if let Some(session) = store.values.get_mut(token) {
+            session.reads.clear();
+        }
+    }
+
     /// A read fetched less than `max_age` ago, if any.
     pub fn cached_read(&self, token: &str, key: &str, max_age: Duration) -> Option<String> {
         let store = self.0.lock().unwrap();
