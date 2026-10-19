@@ -1,7 +1,8 @@
 use crate::auth::LoginLang;
 use crate::host::HostIdentity;
+use std::sync::OnceLock;
 
-const STYLE: &str = r#"
+const STYLE_TEMPLATE: &str = r#"
 :root {
   color-scheme: light dark;
   --color-canvas: #f4f5f8;
@@ -36,33 +37,15 @@ const STYLE: &str = r#"
   --transition: 150ms ease;
 }
 @media (prefers-color-scheme: dark) {
-  :root {
-    --color-canvas: #0f1115;
-    --color-sidebar: #14161c;
-    --color-surface: #181b22;
-    --color-inset: #12141a;
-    --color-field: #11131a;
-    --surface-hover: #242a3a;
-    --border-subtle: #24272f;
-    --border: #2b2f39;
-    --border-strong: #383d4a;
-    --text-primary: #eef0f4;
-    --text-secondary: #c4c9d4;
-    --text-muted: #8b91a1;
-    --accent: #a78bfa;
-    --accent-strong: #c4b5fd;
-    --accent-soft-bg: #2b2450;
-    --accent-soft-text: #d8cbff;
-    --focus-ring: rgb(167 139 250 / 25%);
-    --success-bg: #1c3a2c;
-    --success-text: #9fdcbb;
-    --danger-bg: #3c1e24;
-    --danger-text: #ffb0bc;
-    --shadow-sm: 0 1px 3px rgb(0 0 0 / 30%);
-    --shadow-md: 0 8px 24px rgb(0 0 0 / 35%);
-    --shadow-lg: 0 24px 60px rgb(0 0 0 / 45%);
+  :root:not([data-theme="light"]) {
+@@DARK@@
   }
 }
+:root[data-theme="dark"] {
+@@DARK@@
+  color-scheme: dark;
+}
+:root[data-theme="light"] { color-scheme: light; }
 * { box-sizing: border-box; }
 body {
   margin: 0;
@@ -264,6 +247,15 @@ form button[type="submit"]:hover { filter: brightness(1.08); }
 
 pre { background: var(--color-inset); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 1rem; overflow-x: auto; }
 
+.theme-switch { display: inline-flex; gap: 2px; padding: 3px; border-radius: 999px; background: var(--color-inset); border: 1px solid var(--border-subtle); }
+.theme-switch button {
+  width: 32px; height: 28px; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: 999px;
+  background: transparent; color: var(--text-muted); cursor: pointer; transition: background-color var(--transition), color var(--transition);
+}
+.theme-switch button:hover { color: var(--text-primary); }
+.theme-switch button[aria-pressed="true"] { background: var(--color-surface); color: var(--accent); box-shadow: var(--shadow-sm); }
+.sidebar-foot .theme-switch { justify-self: start; margin: 0 0.3rem 0.2rem; }
+.auth-top { display: flex; justify-content: flex-end; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
 .brand-logo { width: 32px; height: 32px; object-fit: contain; flex-shrink: 0; }
 
 /* Login: machine panel on the left, form on the right. The panel keeps the
@@ -331,6 +323,73 @@ pre { background: var(--color-inset); border: 1px solid var(--border); border-ra
   .field-input input { font-size: 1rem; }
 }
 "#;
+
+/// The dark tokens, applied by the system preference unless the visitor chose
+/// light, and always when the visitor chose dark.
+const DARK_TOKENS: &str = r#"    --color-canvas: #0f1115;
+    --color-sidebar: #14161c;
+    --color-surface: #181b22;
+    --color-inset: #12141a;
+    --color-field: #11131a;
+    --surface-hover: #242a3a;
+    --border-subtle: #24272f;
+    --border: #2b2f39;
+    --border-strong: #383d4a;
+    --text-primary: #eef0f4;
+    --text-secondary: #c4c9d4;
+    --text-muted: #8b91a1;
+    --accent: #a78bfa;
+    --accent-strong: #c4b5fd;
+    --accent-soft-bg: #2b2450;
+    --accent-soft-text: #d8cbff;
+    --focus-ring: rgb(167 139 250 / 25%);
+    --success-bg: #1c3a2c;
+    --success-text: #9fdcbb;
+    --danger-bg: #3c1e24;
+    --danger-text: #ffb0bc;
+    --shadow-sm: 0 1px 3px rgb(0 0 0 / 30%);
+    --shadow-md: 0 8px 24px rgb(0 0 0 / 35%);
+    --shadow-lg: 0 24px 60px rgb(0 0 0 / 45%);"#;
+
+fn style() -> &'static str {
+    static STYLE: OnceLock<String> = OnceLock::new();
+    STYLE.get_or_init(|| STYLE_TEMPLATE.replace("@@DARK@@", DARK_TOKENS))
+}
+
+/// Runs before the stylesheet applies so a chosen theme never flashes.
+const THEME_BOOT: &str = r#"<script>(function(){try{var t=localStorage.getItem("vega-theme");if(t==="dark"||t==="light"){document.documentElement.setAttribute("data-theme",t);}}catch(e){}})();</script>"#;
+
+/// Wires every theme switch on the page; the choice lives in the browser.
+const THEME_WIRE: &str = r#"<script>
+(function(){
+  function apply(value){
+    try{ if(value==="system"){localStorage.removeItem("vega-theme");}else{localStorage.setItem("vega-theme",value);} }catch(e){}
+    if(value==="system"){document.documentElement.removeAttribute("data-theme");}else{document.documentElement.setAttribute("data-theme",value);}
+    document.querySelectorAll("[data-theme-choice]").forEach(function(b){b.setAttribute("aria-pressed",b.getAttribute("data-theme-choice")===value?"true":"false");});
+  }
+  var current=document.documentElement.getAttribute("data-theme")||"system";
+  document.querySelectorAll("[data-theme-choice]").forEach(function(b){
+    b.setAttribute("aria-pressed",b.getAttribute("data-theme-choice")===current?"true":"false");
+    b.addEventListener("click",function(){apply(b.getAttribute("data-theme-choice"));});
+  });
+})();
+</script>"#;
+
+/// Three-way theme switch: system (default), light, dark.
+fn theme_switch(lang: LoginLang) -> String {
+    let t = |pt: &'static str, en: &'static str, es: &'static str| lang.text(pt, en, es);
+    format!(
+        r#"<div class="theme-switch" role="group" aria-label="{label}">
+<button type="button" data-theme-choice="system" aria-pressed="false" title="{system}" aria-label="{system}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="2" y="4" width="20" height="13" rx="2"></rect><path d="M8 21h8M12 17v4"></path></svg></button>
+<button type="button" data-theme-choice="light" aria-pressed="false" title="{light}" aria-label="{light}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"></path></svg></button>
+<button type="button" data-theme-choice="dark" aria-pressed="false" title="{dark}" aria-label="{dark}"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"></path></svg></button>
+</div>"#,
+        label = t("Tema", "Theme", "Tema"),
+        system = t("Tema do sistema", "System theme", "Tema del sistema"),
+        light = t("Tema claro", "Light theme", "Tema claro"),
+        dark = t("Tema escuro", "Dark theme", "Tema oscuro"),
+    )
+}
 
 struct NavItem {
     href: &'static str,
@@ -464,7 +523,8 @@ pub fn page(title: &str, active_href: &str, username: &str, body: &str) -> Strin
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{title} · Vega</title>
-<style>{STYLE}</style>
+{THEME_BOOT}
+<style>{style}</style>
 </head>
 <body>
 <div class="app-shell">
@@ -473,6 +533,7 @@ pub fn page(title: &str, active_href: &str, username: &str, body: &str) -> Strin
 <div class="nav-groups">{nav_groups}</div>
 <div class="sidebar-foot">
 <p class="sidebar-user">{username}</p>
+{theme_switch}
 <form method="post" action="/logout"><button type="submit">Sair</button></form>
 </div>
 </aside>
@@ -481,9 +542,12 @@ pub fn page(title: &str, active_href: &str, username: &str, body: &str) -> Strin
 {body}
 </div>
 </div>
+{THEME_WIRE}
 </body>
 </html>"#,
         crate::pages::widgets::icon(page_icon),
+        theme_switch = theme_switch(LoginLang::Pt),
+        style = style(),
     )
 }
 
@@ -577,7 +641,8 @@ pub fn login_page(error: Option<&str>, lang: LoginLang, host: &HostIdentity) -> 
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{title} {hostname} · Vega</title>
-<style>{STYLE}</style>
+{THEME_BOOT}
+<style>{style}</style>
 </head>
 <body>
 <div class="auth-shell">
@@ -595,10 +660,13 @@ pub fn login_page(error: Option<&str>, lang: LoginLang, host: &HostIdentity) -> 
 <p class="auth-foot">{ICON_LOCK}<span>{security_line}</span></p>
 </aside>
 <main class="auth-main">
+<div class="auth-top">
+{theme_switch}
 <form class="auth-lang" method="get" action="/login">
 <label>{language}<select name="lang">{options}</select></label>
 <button type="submit">OK</button>
 </form>
+</div>
 <div class="auth-card">
 <div>
 <h1>{title} {hostname}</h1>
@@ -634,9 +702,12 @@ document.querySelectorAll("[data-peek]").forEach(function (button) {{
   }});
 }});
 </script>
+{THEME_WIRE}
 </body>
 </html>"#,
         lang_code = lang.code(),
+        theme_switch = theme_switch(lang),
+        style = style(),
         version = env!("CARGO_PKG_VERSION"),
         title = t("Entrar em", "Sign in to", "Entrar en"),
         this_machine = t("Esta máquina", "This machine", "Esta máquina"),
