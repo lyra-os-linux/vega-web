@@ -480,7 +480,9 @@ const NAV: &[NavGroup] = &[
     },
 ];
 
-pub fn page(title: &str, active_href: &str, username: &str, body: &str) -> String {
+pub fn page(title: &str, active_href: &str, user: &crate::auth::CurrentUser, body: &str) -> String {
+    let username = crate::pages::html_escape(&user.name);
+    let address = crate::pages::html_escape(&user.address);
     let nav_groups: String = NAV
         .iter()
         .map(|group| {
@@ -532,7 +534,7 @@ pub fn page(title: &str, active_href: &str, username: &str, body: &str) -> Strin
 <div class="brand"><img class="brand-logo" src="/assets/lyra-logo.png" alt=""><span class="brand-name">Lyra OS</span></div>
 <div class="nav-groups">{nav_groups}</div>
 <div class="sidebar-foot">
-<p class="sidebar-user">{username}</p>
+<p class="sidebar-user">{username}<small>{address}</small></p>
 {theme_switch}
 <form method="post" action="/logout"><button type="submit">Sair</button></form>
 </div>

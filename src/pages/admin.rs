@@ -23,15 +23,16 @@ pub fn notice(state: &AppState) -> String {
 pub async fn handler(
     State(state): State<AppState>,
     jar: PrivateCookieJar,
-    Extension(CurrentUser(username)): Extension<CurrentUser>,
+    Extension(user): Extension<CurrentUser>,
 ) -> Response {
+    let username = user.name.clone();
     if state.admin_socket.is_none() {
         return (
             StatusCode::FORBIDDEN,
             render(
                 "Administração",
                 "/software",
-                &username,
+                &user,
                 super::ADMINISTRATION_UNAVAILABLE_NOTICE.to_owned(),
             ),
         )
@@ -64,7 +65,7 @@ pub async fn handler(
 <button type="submit">Autorizar abertura da porta</button></form>
 <p><a href="/software">Voltar para Software</a> · <a href="/rede">Voltar para Rede</a></p>"#
     );
-    render("Administração", "/software", &username, body).into_response()
+    render("Administração", "/software", &user, body).into_response()
 }
 
 #[derive(Deserialize)]
@@ -72,36 +73,75 @@ pub async fn handler(
 pub struct ActionForm {
     action: String,
     csrf: String,
-    password: String,
+    #[serde(default)]
+    password: Option<String>,
     package: Option<String>,
     port: Option<String>,
     protocol: Option<String>,
     confirmed: Option<String>,
     language: Option<String>,
+    name: Option<String>,
+    enabled: Option<String>,
+    timezone: Option<String>,
+    ntp: Option<String>,
 }
 
 impl ActionForm {
+    /// Every variant checks that only its own parameters are present, so a
+    /// forged form cannot smuggle extra fields into another operation.
     fn operation(&self) -> Option<Operation> {
+        let no_extras = |allowed: &[&str]| {
+            let present: &[(&str, bool)] = &[
+                ("package", self.package.is_some()),
+                ("port", self.port.is_some()),
+                ("protocol", self.protocol.is_some()),
+                ("confirmed", self.confirmed.is_some()),
+                ("language", self.language.is_some()),
+                ("name", self.name.is_some()),
+                ("enabled", self.enabled.is_some()),
+                ("timezone", self.timezone.is_some()),
+                ("ntp", self.ntp.is_some()),
+            ];
+            present
+                .iter()
+                .all(|(field, is_present)| !is_present || allowed.contains(field))
+        };
+        let name = || self.name.as_deref();
+        let enabled = || self.enabled.as_deref();
         match self.action.as_str() {
-            "install"
-                if self.port.is_none()
-                    && self.protocol.is_none()
-                    && self.confirmed.is_none()
-                    && self.language.is_none() =>
-            {
+            "install" if no_extras(&["package"]) => {
                 Operation::install(self.package.as_deref()?).ok()
             }
-            "add-port"
-                if self.package.is_none()
-                    && self.confirmed.is_none()
-                    && self.language.is_none() =>
-            {
+            "remove" if no_extras(&["package"]) => Operation::remove(self.package.as_deref()?).ok(),
+            "add-port" if no_extras(&["port", "protocol"]) => {
                 Operation::port(self.port.as_deref()?, self.protocol.as_deref()?).ok()
             }
+            "remove-port" if no_extras(&["port", "protocol"]) => {
+                Operation::remove_port(self.port.as_deref()?, self.protocol.as_deref()?).ok()
+            }
+            "firewall-service" if no_extras(&["name", "enabled"]) => {
+                Operation::firewall_service(name()?, enabled()?).ok()
+            }
+            "service-enabled" if no_extras(&["name", "enabled"]) => {
+                Operation::service_enabled(name()?, enabled()?).ok()
+            }
+            "service-running" if no_extras(&["name", "enabled"]) => {
+                Operation::service_running(name()?, enabled()?).ok()
+            }
+            "service-restart" if no_extras(&["name"]) => Operation::service_restart(name()?).ok(),
+            "update-all" if no_extras(&[]) => Some(Operation::UpdateAllNative),
+            "repo-enabled" if no_extras(&["name", "enabled"]) => {
+                Operation::repo_enabled(name()?, enabled()?).ok()
+            }
+            "clear-cache" if no_extras(&[]) => Some(Operation::ClearNativeCache),
+            "set-admin" if no_extras(&["name", "enabled"]) => {
+                Operation::set_admin(name()?, enabled()?).ok()
+            }
+            "datetime" if no_extras(&["timezone", "ntp"]) => {
+                Operation::datetime(self.timezone.as_deref()?, self.ntp.as_deref()?).ok()
+            }
             "install-nvidia"
-                if self.package.is_none()
-                    && self.port.is_none()
-                    && self.protocol.is_none()
+                if no_extras(&["confirmed", "language"])
                     && self.confirmed.as_deref() == Some("yes")
                     && self
                         .language
@@ -114,6 +154,89 @@ impl ActionForm {
             _ => None,
         }
     }
+
+    /// The hidden fields a confirmation page must carry so the same
+    /// operation reaches `execute` unchanged.
+    fn hidden_fields(&self) -> String {
+        let mut fields = String::new();
+        for (field, value) in [
+            ("action", Some(self.action.as_str())),
+            ("package", self.package.as_deref()),
+            ("port", self.port.as_deref()),
+            ("protocol", self.protocol.as_deref()),
+            ("name", self.name.as_deref()),
+            ("enabled", self.enabled.as_deref()),
+            ("timezone", self.timezone.as_deref()),
+            ("ntp", self.ntp.as_deref()),
+        ] {
+            if let Some(value) = value {
+                fields.push_str(&format!(
+                    r#"<input type="hidden" name="{field}" value="{}">"#,
+                    html_escape(value)
+                ));
+            }
+        }
+        fields
+    }
+}
+
+/// Step one of every administrative action: a page-level dialog that names
+/// the operation and asks the password. It never touches the broker.
+pub async fn confirm(
+    State(state): State<AppState>,
+    jar: PrivateCookieJar,
+    Extension(user): Extension<CurrentUser>,
+    Form(form): Form<ActionForm>,
+) -> Response {
+    let username = user.name.clone();
+    if state.admin_socket.is_none() {
+        return (
+            StatusCode::FORBIDDEN,
+            render(
+                "Ação indisponível",
+                "/",
+                &user,
+                super::ADMINISTRATION_UNAVAILABLE_NOTICE.to_owned(),
+            ),
+        )
+            .into_response();
+    }
+    let Some(lease) = jar
+        .get(SESSION_COOKIE)
+        .and_then(|cookie| state.sessions.lease(cookie.value(), Instant::now()))
+    else {
+        return Redirect::to("/login").into_response();
+    };
+    if lease.username != username || !matching_csrf(&lease.csrf, &form.csrf) {
+        return (StatusCode::FORBIDDEN, "Confirmação de sessão inválida.").into_response();
+    }
+    let Some(operation) = form.operation() else {
+        return (StatusCode::BAD_REQUEST, "Operação ou parâmetros inválidos.").into_response();
+    };
+    let body = format!(
+        r#"<div class="dialog">
+<div class="dialog-icon">{icon}</div>
+<div>
+<h2>{title}</h2>
+<p class="dialog-summary">A operação é executada com a sua identidade e registrada no journal. Confirme com sua senha.</p>
+</div>
+<form method="post" action="/administracao">
+{hidden}<input type="hidden" name="csrf" value="{csrf}">
+<div class="field"><label for="password">Sua senha</label>
+<div class="field-input"><input id="password" type="password" name="password" autocomplete="current-password" autofocus required maxlength="4096"></div></div>
+<p class="dialog-meta">Autorização polkit <code>{action}</code> · executa como {username}</p>
+<div class="dialog-actions"><a class="button-link" href="{back}">Cancelar</a><button type="submit">Confirmar</button></div>
+</form>
+</div>"#,
+        icon = super::widgets::icon("firewall"),
+        title = html_escape(&operation.describe()),
+        hidden = form.hidden_fields(),
+        csrf = html_escape(&lease.csrf),
+        action = operation.action_id(),
+        username = html_escape(&username),
+        back = operation.return_href(),
+    );
+    render("Confirmar ação", operation.return_href(), &user, body).into_response()
 }
 
 fn matching_csrf(expected: &str, received: &str) -> bool {
@@ -129,11 +252,12 @@ pub async fn execute(
     State(state): State<AppState>,
     ConnectInfo(remote): ConnectInfo<SocketAddr>,
     jar: PrivateCookieJar,
-    Extension(CurrentUser(username)): Extension<CurrentUser>,
+    Extension(user): Extension<CurrentUser>,
     Form(mut form): Form<ActionForm>,
 ) -> Response {
+    let username = user.name.clone();
     // Move the secret out before validation so every early return clears it.
-    let password = Zeroizing::new(std::mem::take(&mut form.password));
+    let password = Zeroizing::new(std::mem::take(&mut form.password).unwrap_or_default());
     let lang = form
         .language
         .as_deref()
@@ -249,7 +373,7 @@ pub async fn execute(
                     render(
                         "NVIDIA",
                         "/hardware",
-                        &username,
+                        &user,
                         format!("<p>{}</p>", html_escape(&error)),
                     ),
                 )
@@ -273,14 +397,24 @@ pub async fn execute(
             eprintln!("vega-web: id={} user={username:?} action={} transaction={} outcome=accepted",
                       result.audit_id, operation.action_id(), result.transaction);
             if let Some(pending)=pending_nvidia {return pending.accepted(result.transaction,lease)}
-            let (status, message) = match operation {
+            state
+                .audit
+                .record(&username, &ip, operation.describe());
+            let (status, message) = match &operation {
                 Operation::InstallNvidia => unreachable!("NVIDIA uses its transaction observer"),
                 Operation::InstallNative(name) => (StatusCode::ACCEPTED, format!(
-                    "Solicitação de instalação de <strong>{}</strong> aceita. Transação {}. A instalação ainda precisa concluir; confira o estado do pacote antes de repetir.", html_escape(&name), result.transaction)),
-                Operation::AddPort { port, tcp } => (StatusCode::OK, format!("Porta {port}/{} adicionada ao firewall.", if tcp { "tcp" } else { "udp" })),
+                    "Solicitação de instalação de <strong>{}</strong> aceita. Transação {}. A instalação ainda precisa concluir; confira o estado do pacote antes de repetir.", html_escape(name), result.transaction)),
+                Operation::RemoveNative(name) => (StatusCode::ACCEPTED, format!(
+                    "Remoção de <strong>{}</strong> aceita. Transação {}.", html_escape(name), result.transaction)),
+                Operation::UpdateAllNative => (StatusCode::ACCEPTED, format!(
+                    "Aplicação das atualizações aceita. Transação {}. Acompanhe o estado em Software.", result.transaction)),
+                Operation::ClearNativeCache => (StatusCode::ACCEPTED, format!(
+                    "Limpeza do cache de pacotes aceita. Transação {}.", result.transaction)),
+                other => (StatusCode::OK, format!("{} concluído.", html_escape(&other.describe()))),
             };
-            (status, render("Administração", "/software", &username,
-                format!("<p>{message}</p><p><a href=\"/software\">Software</a> · <a href=\"/rede\">Rede</a></p>"))).into_response()
+            let back = operation.return_href();
+            (status, render("Ação concluída", back, &user,
+                format!(r#"<p class="notice success">{message}</p><p><a class="button-link" href="{back}">Voltar</a></p>"#))).into_response()
         }
         Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
             let delay = state.login_limiter.failure(&ip, &username, Instant::now());

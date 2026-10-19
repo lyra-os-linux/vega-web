@@ -296,6 +296,53 @@ impl LoginLimiter {
     }
 }
 
+/// One line of the activity shown on the overview: who did what, from where,
+/// and when (local wall clock). Kept in memory, newest first, bounded.
+#[derive(Clone, Debug)]
+pub struct AuditEntry {
+    pub when: String,
+    pub user: String,
+    pub address: String,
+    pub text: String,
+}
+
+#[derive(Clone, Default)]
+pub struct AuditLog(Arc<Mutex<std::collections::VecDeque<AuditEntry>>>);
+
+impl AuditLog {
+    const LIMIT: usize = 40;
+
+    pub fn record(&self, user: &str, address: &str, text: impl Into<String>) {
+        let entry = AuditEntry {
+            when: local_clock(),
+            user: user.to_owned(),
+            address: address.to_owned(),
+            text: text.into(),
+        };
+        let mut log = self.0.lock().unwrap();
+        log.push_front(entry);
+        log.truncate(Self::LIMIT);
+    }
+
+    pub fn recent(&self, limit: usize) -> Vec<AuditEntry> {
+        self.0.lock().unwrap().iter().take(limit).cloned().collect()
+    }
+}
+
+/// "HH:MM" in the host's local time zone, without pulling a time-zone crate.
+fn local_clock() -> String {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs() as libc::time_t)
+        .unwrap_or(0);
+    let mut tm: libc::tm = unsafe { std::mem::zeroed() };
+    // SAFETY: localtime_r writes only into the tm we own; both pointers are valid.
+    if unsafe { libc::localtime_r(&now, &mut tm) }.is_null() {
+        return String::new();
+    }
+    format!("{:02}:{:02}", tm.tm_hour, tm.tm_min)
+}
+
 #[derive(Clone)]
 pub struct AppState {
     pub nvidia_jobs: crate::pages::nvidia::Jobs,
@@ -309,6 +356,7 @@ pub struct AppState {
     pub terminal_slots: Arc<Semaphore>,
     pub terminal_socket: String,
     pub admin_socket: Option<String>,
+    pub audit: AuditLog,
 }
 
 impl FromRef<AppState> for Key {

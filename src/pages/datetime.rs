@@ -36,5 +36,5 @@ pub async fn handler(
         Err(error) => error_body("Status de data/hora indisponível", error),
     };
 
-    render("Data e Hora", "/data-hora", &user.0, body)
+    render("Data e Hora", "/data-hora", &user, body)
 }

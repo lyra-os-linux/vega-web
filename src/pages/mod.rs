@@ -27,7 +27,7 @@ pub(crate) async fn administration_unavailable(
 ) -> (axum::http::StatusCode, axum::response::Html<String>) {
     eprintln!(
         "vega-web: escrita indisponível usuário={:?} rota={:?} motivo=per-user-authorization-unavailable",
-        user.0,
+        user.name,
         uri.path()
     );
     (
@@ -35,7 +35,7 @@ pub(crate) async fn administration_unavailable(
         render(
             "Ação indisponível",
             uri.path(),
-            &user.0,
+            &user,
             ADMINISTRATION_UNAVAILABLE_NOTICE.to_string(),
         ),
     )
@@ -48,10 +48,10 @@ pub(crate) fn error_body(context: &str, detail: impl std::fmt::Display) -> Strin
 pub(crate) fn render(
     title: &str,
     active_href: &str,
-    username: &str,
+    user: &crate::auth::CurrentUser,
     body: String,
 ) -> axum::response::Html<String> {
-    axum::response::Html(layout::page(title, active_href, username, &body))
+    axum::response::Html(layout::page(title, active_href, user, &body))
 }
 
 pub(crate) fn html_escape(input: &str) -> String {

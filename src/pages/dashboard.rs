@@ -93,5 +93,5 @@ pub async fn handler(
         Err(error) => body.push_str(&error_body("Status de snapshots indisponível", error)),
     }
 
-    render("Painel", "/", &user.0, body)
+    render("Painel", "/", &user, body)
 }

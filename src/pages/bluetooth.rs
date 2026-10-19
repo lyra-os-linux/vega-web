@@ -55,5 +55,5 @@ pub async fn handler(
         Err(error) => body.push_str(&error_body("Lista de dispositivos indisponível", error)),
     }
 
-    render("Bluetooth", "/bluetooth", &user.0, body)
+    render("Bluetooth", "/bluetooth", &user, body)
 }

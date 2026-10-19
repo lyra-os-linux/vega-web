@@ -151,6 +151,7 @@ async fn authorization_integration_rejects_writes_without_calling_daemon() {
         terminal_slots: Arc::new(Semaphore::new(1)),
         terminal_socket: "/unused-test-terminal.sock".into(),
         admin_socket: None,
+        audit: Default::default(),
     };
     let router = build_router(state);
     let tcp = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -254,6 +255,7 @@ async fn authorization_integration_admin_frontdoor_rejects_forgery_before_broker
         terminal_slots: Arc::new(Semaphore::new(1)),
         terminal_socket: "/unused".into(),
         admin_socket: Some(path.to_str().unwrap().into()),
+        audit: Default::default(),
     };
     let router = build_router(state);
     let tcp = TcpListener::bind("127.0.0.1:0").await.unwrap();

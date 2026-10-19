@@ -152,5 +152,5 @@ pub async fn handler(
         Err(error) => body.push_str(&error_body("Lista de regras de porta indisponível", error)),
     }
 
-    render("Rede e Firewall", "/rede", &user.0, body)
+    render("Rede e Firewall", "/rede", &user, body)
 }

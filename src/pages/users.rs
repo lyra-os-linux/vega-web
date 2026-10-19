@@ -42,5 +42,5 @@ pub async fn handler(
         Err(error) => error_body("Lista de usuários indisponível", error),
     };
 
-    render("Usuários", "/usuarios", &user.0, body)
+    render("Usuários", "/usuarios", &user, body)
 }

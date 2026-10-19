@@ -98,5 +98,5 @@ pub async fn handler(
         }
     }
 
-    render("Logs", "/logs", &user.0, body)
+    render("Logs", "/logs", &user, body)
 }

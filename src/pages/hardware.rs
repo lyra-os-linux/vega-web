@@ -67,5 +67,5 @@ pub async fn handler(
         )),
     }
 
-    render("Hardware e Kernel", "/hardware", &user.0, body)
+    render("Hardware e Kernel", "/hardware", &user, body)
 }

@@ -49,5 +49,5 @@ pub async fn handler(
         Err(error) => error_body("Lista de configurações de backup indisponível", error),
     };
 
-    render("Backup", "/backup", &user.0, body)
+    render("Backup", "/backup", &user, body)
 }

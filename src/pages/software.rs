@@ -77,7 +77,7 @@ pub async fn handler(
         Err(error) => body.push_str(&error_body("Lista de repositórios indisponível", error)),
     }
 
-    render("Software", "/software", &user.0, body)
+    render("Software", "/software", &user, body)
 }
 
 fn package_table(title: &str, packages: &[lyra_vega_dbus::PackageRef]) -> String {

@@ -84,5 +84,5 @@ pub async fn handler(
         Err(error) => error_body("Lista de serviços indisponível", error),
     };
 
-    render("Serviços", "/servicos", &user.0, body)
+    render("Serviços", "/servicos", &user, body)
 }

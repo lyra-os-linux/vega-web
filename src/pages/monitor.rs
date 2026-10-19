@@ -127,7 +127,7 @@ pub async fn handler(
         Err(error) => body.push_str(&error_body("Lista de processos indisponível", error)),
     }
 
-    render("Monitor", "/monitor", &user.0, body)
+    render("Monitor", "/monitor", &user, body)
 }
 
 fn format_bytes(bytes: u64) -> String {

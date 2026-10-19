@@ -188,7 +188,9 @@ impl Operation {
             | Self::RepoEnabled { .. }
             | Self::ClearNativeCache => "/software",
             Self::InstallNvidia => "/hardware/nvidia",
-            Self::AddPort { .. } | Self::RemovePort { .. } | Self::FirewallService { .. } => "/rede",
+            Self::AddPort { .. } | Self::RemovePort { .. } | Self::FirewallService { .. } => {
+                "/rede"
+            }
             Self::ServiceEnabled { .. } | Self::ServiceRunning { .. } | Self::ServiceRestart(_) => {
                 "/servicos"
             }
@@ -203,36 +205,68 @@ impl Operation {
         match self {
             Self::InstallNative(name) => format!("Instalar o pacote {name}"),
             Self::InstallNvidia => "Instalar o driver NVIDIA oficial".to_owned(),
-            Self::AddPort { port, tcp } => format!("Abrir a porta {port}/{} no firewall", proto(tcp)),
+            Self::AddPort { port, tcp } => {
+                format!("Abrir a porta {port}/{} no firewall", proto(tcp))
+            }
             Self::RemovePort { port, tcp } => {
                 format!("Fechar a porta {port}/{} no firewall", proto(tcp))
             }
-            Self::FirewallService { name, enabled: true } => {
+            Self::FirewallService {
+                name,
+                enabled: true,
+            } => {
                 format!("Permitir o serviço {name} no firewall")
             }
-            Self::FirewallService { name, enabled: false } => {
+            Self::FirewallService {
+                name,
+                enabled: false,
+            } => {
                 format!("Bloquear o serviço {name} no firewall")
             }
-            Self::ServiceEnabled { name, enabled: true } => {
+            Self::ServiceEnabled {
+                name,
+                enabled: true,
+            } => {
                 format!("Habilitar {name} na inicialização")
             }
-            Self::ServiceEnabled { name, enabled: false } => {
+            Self::ServiceEnabled {
+                name,
+                enabled: false,
+            } => {
                 format!("Desabilitar {name} na inicialização")
             }
-            Self::ServiceRunning { name, running: true } => format!("Iniciar {name}"),
-            Self::ServiceRunning { name, running: false } => format!("Parar {name}"),
+            Self::ServiceRunning {
+                name,
+                running: true,
+            } => format!("Iniciar {name}"),
+            Self::ServiceRunning {
+                name,
+                running: false,
+            } => format!("Parar {name}"),
             Self::ServiceRestart(name) => format!("Reiniciar {name}"),
             Self::UpdateAllNative => "Aplicar todas as atualizações disponíveis".to_owned(),
             Self::RemoveNative(name) => format!("Remover o pacote {name}"),
-            Self::RepoEnabled { name, enabled: true } => format!("Habilitar o repositório {name}"),
-            Self::RepoEnabled { name, enabled: false } => {
+            Self::RepoEnabled {
+                name,
+                enabled: true,
+            } => format!("Habilitar o repositório {name}"),
+            Self::RepoEnabled {
+                name,
+                enabled: false,
+            } => {
                 format!("Desabilitar o repositório {name}")
             }
             Self::ClearNativeCache => "Limpar o cache de pacotes".to_owned(),
-            Self::SetAdmin { username, admin: true } => {
+            Self::SetAdmin {
+                username,
+                admin: true,
+            } => {
                 format!("Tornar {username} administrador")
             }
-            Self::SetAdmin { username, admin: false } => {
+            Self::SetAdmin {
+                username,
+                admin: false,
+            } => {
                 format!("Retirar {username} dos administradores")
             }
             Self::DateTime { timezone, ntp } => format!(
@@ -258,7 +292,11 @@ impl Operation {
                 named(1, None, name)
             }
             Self::AddPort { port, tcp } | Self::RemovePort { port, tcp } if *port > 0 => {
-                let mut bytes = vec![if matches!(self, Self::AddPort { .. }) { 2 } else { 4 }];
+                let mut bytes = vec![if matches!(self, Self::AddPort { .. }) {
+                    2
+                } else {
+                    4
+                }];
                 bytes.extend_from_slice(&port.to_be_bytes());
                 bytes.push(u8::from(*tcp));
                 Ok(bytes)

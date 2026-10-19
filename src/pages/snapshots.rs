@@ -58,7 +58,7 @@ pub async fn handler(
         Err(error) => error_body("Status de snapshots indisponível", error),
     };
 
-    render("Snapshots", "/snapshots", &user.0, body)
+    render("Snapshots", "/snapshots", &user, body)
 }
 
 fn format_timestamp(unix_seconds: i64) -> String {

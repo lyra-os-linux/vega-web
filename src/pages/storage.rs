@@ -40,5 +40,5 @@ pub async fn handler(
         Err(error) => error_body("Lista de volumes indisponível", error),
     };
 
-    render("Armazenamento", "/armazenamento", &user.0, body)
+    render("Armazenamento", "/armazenamento", &user, body)
 }
