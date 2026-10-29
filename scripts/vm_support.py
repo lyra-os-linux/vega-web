@@ -8,6 +8,11 @@ import sys
 import sysconfig
 import tempfile
 
+# Guest RAM. The admin VM carries Python, RPM, Zypper and firewalld; at 1536
+# MiB its initramfs no longer fit the rootfs (half of the RAM) on the
+# October 2026 runner image.
+VM_MEMORY_MIB = 3072
+
 
 class SystemdVM:
     def __init__(self, name, os_id):
@@ -110,12 +115,20 @@ exec /usr/lib/systemd/systemd --system --log-level=warning --log-target=console 
         files = b'\0'.join(str(path.relative_to(self.root)).encode() for path in self.root.rglob('*')) + b'\0'
         archive = subprocess.run(['cpio', '--null', '-o', '--format=newc', '--owner=0:0'],
                                  cwd=self.root, input=files, capture_output=True, check=True)
+        # The kernel unpacks the initramfs into rootfs, which gets half of the
+        # guest RAM. An archive near that limit fails with "Initramfs unpacking
+        # failed: write error" and later as missing libraries; fail clearly.
+        rootfs = VM_MEMORY_MIB * 1024 * 1024 // 2
+        if len(archive.stdout) > rootfs * 9 // 10:
+            raise SystemExit(f'initramfs is {len(archive.stdout)} bytes, too close to the '
+                             f'{rootfs}-byte rootfs of a {VM_MEMORY_MIB} MiB VM; raise VM_MEMORY_MIB')
         initrd = self.base / 'initramfs.cpio.gz'
         with gzip.open(initrd, 'wb', compresslevel=1) as stream:
             stream.write(archive.stdout)
-        print(f'VM image: {initrd} ({initrd.stat().st_size} bytes)', flush=True)
+        print(f'VM image: {initrd} ({initrd.stat().st_size} bytes, '
+              f'{len(archive.stdout)} unpacked, rootfs {rootfs})', flush=True)
         log.parent.mkdir(parents=True, exist_ok=True)
-        command = ['qemu-system-x86_64', '-accel', 'tcg', '-cpu', 'max', '-smp', '2', '-m', '1536',
+        command = ['qemu-system-x86_64', '-accel', 'tcg', '-cpu', 'max', '-smp', '2', '-m', str(VM_MEMORY_MIB),
                    '-kernel', str(kernel.resolve()), '-initrd', str(initrd),
                    '-append', 'rdinit=/init console=ttyS0 quiet panic=1 selinux=0 systemd.log_level=warning',
                    '-display', 'none', '-serial', 'stdio', '-monitor', 'none', '-no-reboot', '-nic', 'none']
