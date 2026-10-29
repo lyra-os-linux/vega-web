@@ -8,9 +8,10 @@ import sys
 import sysconfig
 import tempfile
 
-# Guest RAM. The admin VM carries Python, RPM, Zypper and firewalld; at 1536
-# MiB its initramfs no longer fit the rootfs (half of the RAM) on the
-# October 2026 runner image.
+# Guest RAM. The admin VM carries Python, RPM, Zypper and firewalld (130 MB
+# compressed, 368 MB unpacked). At 1536 MiB the kernel failed to unpack it on
+# the October 2026 runner image ("write error", then missing libraries),
+# with the compressed image, the unpacked rootfs and the kernel sharing RAM.
 VM_MEMORY_MIB = 3072
 
 
@@ -116,8 +117,8 @@ exec /usr/lib/systemd/systemd --system --log-level=warning --log-target=console 
         archive = subprocess.run(['cpio', '--null', '-o', '--format=newc', '--owner=0:0'],
                                  cwd=self.root, input=files, capture_output=True, check=True)
         # The kernel unpacks the initramfs into rootfs, which gets half of the
-        # guest RAM. An archive near that limit fails with "Initramfs unpacking
-        # failed: write error" and later as missing libraries; fail clearly.
+        # guest RAM; an archive near that limit fails as "write error" and
+        # missing libraries deep inside the VM, so fail here instead.
         rootfs = VM_MEMORY_MIB * 1024 * 1024 // 2
         if len(archive.stdout) > rootfs * 9 // 10:
             raise SystemExit(f'initramfs is {len(archive.stdout)} bytes, too close to the '
