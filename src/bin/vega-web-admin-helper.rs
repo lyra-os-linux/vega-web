@@ -6,8 +6,9 @@ mod admin_polkit;
 mod pam_ffi;
 
 use lyra_vega_dbus::{
-    BackupClient, DateTimeClient, FirewallClient, KernelClient, LogsClient, ServicesClient,
-    SnapshotsClient, SoftwareClient, UsersClient, VegaDbus,
+    BackupClient, CleanupClient, DateTimeClient, DiagnosticOptions, DiagnosticsClient,
+    FirewallClient, KernelClient, LogsClient, ServicesClient, SnapshotsClient, SoftwareClient,
+    UsersClient, VegaDbus,
 };
 use rand::RngExt;
 use std::ffi::{CStr, CString};
@@ -348,6 +349,42 @@ async fn read_payload(dbus: &VegaDbus, query: ReadQuery) -> Result<Vec<u8>> {
                     .collect(),
             })?
         }
+        ReadQuery::LastPeriodic => {
+            let run = dbus.diagnostics().last_periodic().await?;
+            serde_json::to_vec(&admin_read::LastPeriodic {
+                job: run.job_id,
+                finished: run.finished,
+                novelties: run.novelties,
+                stages: run
+                    .stages
+                    .into_iter()
+                    .map(|(id, verdict, summary)| admin_read::PeriodicStage {
+                        id,
+                        verdict,
+                        summary,
+                    })
+                    .collect(),
+                novelty_texts: run.novelty_texts,
+            })?
+        }
+        ReadQuery::CleanupScan => {
+            let categories = dbus.cleanup().scan().await?;
+            serde_json::to_vec(&admin_read::CleanupScan {
+                categories: categories
+                    .into_iter()
+                    .map(|category| admin_read::CleanupCategory {
+                        id: category.id,
+                        bytes: category.bytes,
+                        can_clean: category.can_clean,
+                        count: category.detail.count,
+                        size_unknown: category.detail.size_unknown,
+                        minimum: category.detail.minimum,
+                        reason: category.detail.reason,
+                        items: category.detail.items,
+                    })
+                    .collect(),
+            })?
+        }
     };
     if json.len() > admin_read::MAX_PAYLOAD {
         return Err("read payload too large".into());
@@ -355,11 +392,42 @@ async fn read_payload(dbus: &VegaDbus, query: ReadQuery) -> Result<Vec<u8>> {
     Ok(json)
 }
 
+/// The panel speaks Brazilian Portuguese; the report texts follow it.
+fn options() -> DiagnosticOptions {
+    DiagnosticOptions {
+        locale: Some("pt-BR".into()),
+        ..DiagnosticOptions::default()
+    }
+}
+
+/// Starts the network test, waits for it on `Current` (a quick test may end
+/// before `Start` answers) and reads its report, all inside the worker's
+/// deadline: one password for the whole check.
+async fn network_check(dbus: &VegaDbus) -> Result<(u32, Vec<u8>)> {
+    let diagnostics = dbus.diagnostics();
+    let job = diagnostics
+        .start(&["network".to_owned()], &options())
+        .await?;
+    tokio::time::timeout(Duration::from_secs(20), async {
+        while diagnostics.current().await?.job_id == job {
+            tokio::time::sleep(Duration::from_millis(250)).await;
+        }
+        Ok::<_, lyra_vega_dbus::DiagnosticsClientError>(())
+    })
+    .await??;
+    let report = diagnostics.report(job, false).await?;
+    Ok((
+        job,
+        serde_json::to_vec(&admin_read::NetworkCheck { job, report })?,
+    ))
+}
+
 fn worker() -> Result<()> {
     let mut length = [0u8; 2];
     io::stdin().read_exact(&mut length)?;
     let length = u16::from_be_bytes(length) as usize;
-    if !(8..=464).contains(&length) {
+    // uid, name length, a 256-byte name and the longest operation.
+    if !(8..=780).contains(&length) {
         return Err("invalid worker request".into());
     }
     let mut frame = vec![0u8; length];
@@ -453,6 +521,30 @@ fn worker() -> Result<()> {
                     dbus.users().set_admin(&username, admin).await?;
                     Ok((0, Vec::new()))
                 }
+                Operation::DiagnosticsStart(tests) => Ok((
+                    dbus.diagnostics().start(&tests, &options()).await?,
+                    Vec::new(),
+                )),
+                Operation::NetworkCheck => network_check(&dbus).await,
+                Operation::DiagnosticsReport { job, redact } => Ok((
+                    job,
+                    dbus.diagnostics().report(job, redact).await?.into_bytes(),
+                )),
+                Operation::RepairFindings { job, findings } => Ok((
+                    dbus.diagnostics().repair_findings(job, &findings).await?,
+                    Vec::new(),
+                )),
+                Operation::MarkLogsSeen(job) => {
+                    dbus.diagnostics().mark_logs_seen(job).await?;
+                    Ok((job, Vec::new()))
+                }
+                Operation::SetPeriodic { enabled, daily } => {
+                    dbus.diagnostics()
+                        .set_periodic(enabled, if daily { "daily" } else { "weekly" })
+                        .await?;
+                    Ok((0, Vec::new()))
+                }
+                Operation::CleanupClean(ids) => Ok((dbus.cleanup().clean(&ids).await?, Vec::new())),
                 Operation::DateTime { timezone, ntp } => {
                     let datetime = dbus.datetime();
                     let current = datetime.status().await?;

@@ -51,6 +51,7 @@ async fn main() {
 
     let state = AppState {
         nvidia_jobs: Default::default(),
+        cleanup_jobs: Default::default(),
         dbus,
         sessions: SessionStore::new(SessionPolicy {
             idle_timeout: Duration::from_secs(env_u64("VEGA_WEB_SESSION_IDLE_SECS", 1800)),
@@ -118,7 +119,31 @@ fn build_router(state: AppState) -> Router {
             "/hardware/nvidia/progress/{id}",
             get(pages::nvidia::progress),
         )
+        .route("/hardware/diagnostico", get(pages::diagnostics::handler))
+        .route(
+            "/hardware/diagnostico/relatorio/{job}",
+            get(pages::diagnostics::report),
+        )
+        .route(
+            "/hardware/diagnostico/corrigir",
+            post(pages::diagnostics::fix).layer(axum::extract::DefaultBodyLimit::max(8192)),
+        )
+        .route(
+            "/hardware/diagnostico/ajuda/{job}",
+            get(pages::diagnostics::help_form)
+                .post(pages::diagnostics::help_text_post)
+                .layer(axum::extract::DefaultBodyLimit::max(16384)),
+        )
+        .route("/rede/internet", get(pages::diagnostics::network))
         .route("/armazenamento", get(pages::storage::handler))
+        .route(
+            "/armazenamento/limpar",
+            post(pages::diagnostics::clean).layer(axum::extract::DefaultBodyLimit::max(8192)),
+        )
+        .route(
+            "/armazenamento/limpeza/{id}",
+            get(pages::diagnostics::cleanup_progress),
+        )
         .route(
             "/rede",
             get(pages::network::handler).post(pages::administration_unavailable),

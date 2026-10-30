@@ -995,7 +995,7 @@ checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
 [[package]]
 name = "lyra-vega-dbus"
 version = "5.1.22"
-source = "git+https://github.com/lyra-os-linux/lyra-vega-dbus?rev=5d559f9f1f95916a33befe23af6da6084012e000#5d559f9f1f95916a33befe23af6da6084012e000"
+source = "git+https://github.com/lyra-os-linux/lyra-vega-dbus?rev=7333f576c36fd7657125f7d72d8386a5186aea85#7333f576c36fd7657125f7d72d8386a5186aea85"
 dependencies = [
  "async-io",
  "async-lock",
@@ -1944,7 +1944,7 @@ dependencies = [
 
 [[package]]
 name = "vega-web"
-version = "5.1.25"
+version = "5.2.0"
 dependencies = [
  "axum",
  "axum-extra",
@@ -1958,6 +1958,7 @@ dependencies = [
  "rustls",
  "serde",
  "serde_json",
+ "serde_urlencoded",
  "tempfile",
  "time",
  "tokio",

@@ -141,6 +141,7 @@ async fn authorization_integration_rejects_writes_without_calling_daemon() {
     let sessions = SessionStore::new(SessionPolicy::default());
     let state = AppState {
         nvidia_jobs: Default::default(),
+        cleanup_jobs: Default::default(),
         dbus,
         sessions: sessions.clone(),
         cookie_key: key.clone(),
@@ -245,6 +246,7 @@ async fn authorization_integration_admin_frontdoor_rejects_forgery_before_broker
     assert_ne!(alice.admin_binding, bob.admin_binding);
     let state = AppState {
         nvidia_jobs: Default::default(),
+        cleanup_jobs: Default::default(),
         dbus: lyra_vega_dbus::VegaDbus::connect().await.unwrap(),
         sessions: sessions.clone(),
         cookie_key: key.clone(),
@@ -369,6 +371,98 @@ async fn authorization_integration_admin_frontdoor_rejects_forgery_before_broker
         let response = request(address, "POST", "/administracao", &cookie, &body).await;
         assert!(response.starts_with("HTTP/1.1 422"), "{response}");
         assert!(!response.contains("secret"));
+    }
+    // Diagnostics and cleanup: fixed fields only, refused before the broker.
+    for body in [
+        format!(
+            "action=diagnostics-start&csrf={}&tests=network&password=secret",
+            alice.csrf
+        ),
+        format!(
+            "action=diagnostics-start&csrf={}&tests=..%2F..%2Fetc&password=secret",
+            alice.csrf
+        ),
+        format!(
+            "action=repair-findings&csrf={}&job=1&findings=etc:0&password=secret",
+            alice.csrf
+        ),
+        format!(
+            "action=mark-logs-seen&csrf={}&job=0&password=secret",
+            alice.csrf
+        ),
+        format!(
+            "action=set-periodic&csrf={}&enabled=true&frequency=monthly&password=secret",
+            alice.csrf
+        ),
+        format!(
+            "action=cleanup-clean&csrf={}&categories=trash&password=secret",
+            alice.csrf
+        ),
+        format!(
+            "action=network-check&csrf={}&tests=logs&password=secret",
+            alice.csrf
+        ),
+    ] {
+        let response = request(address, "POST", "/administracao", &cookie, &body).await;
+        assert!(response.starts_with("HTTP/1.1 400"), "{body}: {response}");
+        assert!(!response.contains("secret"));
+    }
+    for (path, body, status) in [
+        (
+            "/hardware/diagnostico/corrigir",
+            format!(
+                "csrf={}&job=4&finding=logs:0&finding=security:2",
+                alice.csrf
+            ),
+            "200",
+        ),
+        (
+            "/hardware/diagnostico/corrigir",
+            format!("csrf={}&job=4&finding=etc:0", alice.csrf),
+            "400",
+        ),
+        (
+            "/hardware/diagnostico/corrigir",
+            format!("csrf={}&job=4&finding=logs:0&uid=0", alice.csrf),
+            "400",
+        ),
+        (
+            "/hardware/diagnostico/corrigir",
+            "csrf=forged&job=4&finding=logs:0".to_string(),
+            "403",
+        ),
+        (
+            "/armazenamento/limpar",
+            format!(
+                "csrf={}&category=journal&category=package-cache",
+                alice.csrf
+            ),
+            "200",
+        ),
+        (
+            "/armazenamento/limpar",
+            format!("csrf={}&category=trash", alice.csrf),
+            "400",
+        ),
+        (
+            "/armazenamento/limpar",
+            format!("csrf={}&category=journal&category=journal", alice.csrf),
+            "400",
+        ),
+    ] {
+        let response = request(address, "POST", path, &cookie, &body).await;
+        assert!(
+            response.starts_with(&format!("HTTP/1.1 {status}")),
+            "{path} {body}: {response}"
+        );
+        if status == "200" {
+            // The confirmation step names the action and carries the list.
+            assert!(response.contains("autocomplete=\"current-password\""));
+            assert!(
+                response.contains("org.lyraos.vega.hardware.repair")
+                    || response.contains("org.lyraos.vega.storage.cleanup")
+            );
+        }
     }
     let large = "password=".to_string() + &"x".repeat(9000);
     assert!(

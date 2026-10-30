@@ -325,6 +325,10 @@ form button[type="submit"]:hover { filter: brightness(1.08); }
 @media (max-width: 38rem) { .inline-form { grid-template-columns: 1fr; } }
 
 pre { background: var(--color-inset); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 1rem; overflow-x: auto; }
+pre.help-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+label.check { display: flex; align-items: center; gap: 0.5rem; margin: 0.35rem 0; font-weight: 400; }
+label.check input { width: auto; min-height: 0; }
+section.panel { margin: 0 0 1rem; }
 
 .theme-switch { display: inline-flex; gap: 2px; padding: 3px; border-radius: 999px; background: var(--color-inset); border: 1px solid var(--border-subtle); }
 .theme-switch button {

@@ -87,6 +87,10 @@ pub async fn handler(
         Err(error) => body.push_str(&error_body("Configuração de proxy indisponível", error)),
     }
 
+    body.push_str(
+        r#"<div class="notice"><strong>Minha internet não funciona</strong><span>Testa a conexão passo a passo, do cabo até a internet, e aponta onde está o problema.</span><a class="button-link" href="/rede/internet">Testar a conexão</a></div>"#,
+    );
+
     let firewall = state.dbus.firewall();
     match firewall.status().await {
         Ok(status) => body.push_str(&format!(

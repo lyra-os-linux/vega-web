@@ -85,6 +85,7 @@ async fn exercise_session(scenario: &str) {
     let grants = TerminalGrants::default();
     let state = AppState {
         nvidia_jobs: Default::default(),
+        cleanup_jobs: Default::default(),
         dbus: lyra_vega_dbus::VegaDbus::connect().await.unwrap(),
         sessions: sessions.clone(),
         cookie_key: key.clone(),
