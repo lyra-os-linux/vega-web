@@ -14,8 +14,11 @@ pub const GRANT_TIMEOUT: Duration = Duration::from_secs(10);
 pub const CLIENT_TIMEOUT: Duration = Duration::from_secs(70);
 const MAGIC: &[u8; 4] = b"VWA1";
 const COMMIT: &[u8; 4] = b"VWC1";
-// Longest operation frame: one code byte, one flag byte and a 200-byte name.
-const MAX_OPERATION: usize = 202;
+// Longest operation frame: a code byte, the job and the findings list
+// (16 pairs of a test id and an index).
+const MAX_OPERATION: usize = 512;
+/// Findings fixed by one `RepairFindings`.
+const MAX_FINDINGS: usize = 16;
 const MAX_NAME: usize = 200;
 
 /// One administrative operation, authorized by the user's own password through
@@ -64,6 +67,26 @@ pub enum Operation {
     },
     /// An administrative read, answered with a JSON payload.
     Read(ReadQuery),
+    /// Health check tests by id (`Diagnostics.Start`); the network test
+    /// alone is `NetworkCheck`.
+    DiagnosticsStart(Vec<String>),
+    /// The network test, its wait and its report in one operation.
+    NetworkCheck,
+    DiagnosticsReport {
+        job: u32,
+        redact: bool,
+    },
+    RepairFindings {
+        job: u32,
+        findings: Vec<(String, u32)>,
+    },
+    MarkLogsSeen(u32),
+    SetPeriodic {
+        enabled: bool,
+        daily: bool,
+    },
+    /// System cleanup categories by id (`Cleanup.Clean`).
+    CleanupClean(Vec<String>),
 }
 
 fn invalid() -> io::Error {
@@ -102,7 +125,119 @@ fn port_number(port: &str, protocol: &str) -> io::Result<(u16, bool)> {
     Ok((port, protocol == "tcp"))
 }
 
+/// A comma-separated list of distinct ids, each one from `known`.
+fn known_list(list: &str, known: &[&str], max: usize) -> io::Result<Vec<String>> {
+    let ids: Vec<String> = list.split(',').map(str::to_owned).collect();
+    if ids.is_empty() || ids.len() > max {
+        return Err(invalid());
+    }
+    for (index, id) in ids.iter().enumerate() {
+        if !known.contains(&id.as_str()) || ids[..index].contains(id) {
+            return Err(invalid());
+        }
+    }
+    Ok(ids)
+}
+
+fn job_number(job: &str) -> io::Result<u32> {
+    if job.is_empty() || job.len() > 10 || !job.bytes().all(|byte| byte.is_ascii_digit()) {
+        return Err(invalid());
+    }
+    match job.parse() {
+        Ok(job) if job > 0 => Ok(job),
+        _ => Err(invalid()),
+    }
+}
+
+fn job_bytes(code: u8, flag: Option<bool>, job: u32) -> Vec<u8> {
+    let mut bytes = vec![code];
+    if let Some(flag) = flag {
+        bytes.push(u8::from(flag));
+    }
+    bytes.extend_from_slice(&job.to_be_bytes());
+    bytes
+}
+
 impl Operation {
+    /// Test ids such as `packages,logs,network`; never the network test alone.
+    pub fn diagnostics_start(tests: &str) -> io::Result<Self> {
+        let tests = known_list(tests, lyra_vega_dbus::DIAGNOSTIC_TEST_IDS, 16)?;
+        if tests == ["network"] {
+            return Err(invalid());
+        }
+        Ok(Self::DiagnosticsStart(tests))
+    }
+
+    /// Job 0 is the most recent report, as in `Diagnostics.Report`.
+    pub fn diagnostics_report(job: &str, redact: &str) -> io::Result<Self> {
+        Ok(Self::DiagnosticsReport {
+            job: if job == "0" { 0 } else { job_number(job)? },
+            redact: flag(redact)?,
+        })
+    }
+
+    /// Findings such as `logs:0,security:2`, the pairs `Remedies` returns.
+    pub fn repair_findings(job: &str, findings: &str) -> io::Result<Self> {
+        let job = job_number(job)?;
+        let mut pairs = Vec::new();
+        for item in findings.split(',') {
+            let (stage, index) = item.split_once(':').ok_or_else(invalid)?;
+            if !lyra_vega_dbus::DIAGNOSTIC_TEST_IDS.contains(&stage)
+                || index.is_empty()
+                || index.len() > 3
+                || !index.bytes().all(|byte| byte.is_ascii_digit())
+            {
+                return Err(invalid());
+            }
+            let pair = (stage.to_owned(), index.parse().map_err(|_| invalid())?);
+            if pairs.contains(&pair) {
+                return Err(invalid());
+            }
+            pairs.push(pair);
+        }
+        if pairs.is_empty() || pairs.len() > MAX_FINDINGS {
+            return Err(invalid());
+        }
+        Ok(Self::RepairFindings {
+            job,
+            findings: pairs,
+        })
+    }
+
+    pub fn mark_logs_seen(job: &str) -> io::Result<Self> {
+        Ok(Self::MarkLogsSeen(job_number(job)?))
+    }
+
+    /// `weekly` or `daily`, the frequencies vegad accepts.
+    pub fn set_periodic(enabled: &str, frequency: &str) -> io::Result<Self> {
+        let daily = match frequency {
+            "weekly" => false,
+            "daily" => true,
+            _ => return Err(invalid()),
+        };
+        Ok(Self::SetPeriodic {
+            enabled: flag(enabled)?,
+            daily,
+        })
+    }
+
+    /// Category ids such as `journal,package-cache`.
+    pub fn cleanup_clean(categories: &str) -> io::Result<Self> {
+        Ok(Self::CleanupClean(known_list(
+            categories,
+            lyra_vega_dbus::CLEANUP_CATEGORY_IDS,
+            lyra_vega_dbus::CLEANUP_CATEGORY_IDS.len(),
+        )?))
+    }
+
+    fn findings_text(findings: &[(String, u32)]) -> String {
+        findings
+            .iter()
+            .map(|(stage, index)| format!("{stage}:{index}"))
+            .collect::<Vec<_>>()
+            .join(",")
+    }
+
     /// Native package names: RPM names such as `libstdc++6` or `python3.12`.
     pub fn install(name: &str) -> io::Result<Self> {
         Ok(Self::InstallNative(checked_name(name, b"+_.-")?))
@@ -205,6 +340,15 @@ impl Operation {
             Self::SetAdmin { .. } => "org.lyraos.vega.users.manage",
             Self::DateTime { .. } => "org.lyraos.vega.system.configure",
             Self::Read(query) => query.action_id(),
+            Self::DiagnosticsStart(_) | Self::MarkLogsSeen(_) | Self::SetPeriodic { .. } => {
+                "org.lyraos.vega.hardware.diagnose"
+            }
+            Self::NetworkCheck => "org.lyraos.vega.network.diagnose",
+            // vegad uses network.diagnose for a report of the network test
+            // alone, which then needs no challenge.
+            Self::DiagnosticsReport { .. } => "org.lyraos.vega.logs.read-admin",
+            Self::RepairFindings { .. } => "org.lyraos.vega.hardware.repair",
+            Self::CleanupClean(_) => "org.lyraos.vega.storage.cleanup",
         }
     }
 
@@ -226,6 +370,13 @@ impl Operation {
             Self::SetAdmin { .. } => "/usuarios",
             Self::DateTime { .. } => "/data-hora",
             Self::Read(query) => query.return_href(),
+            Self::DiagnosticsStart(_)
+            | Self::DiagnosticsReport { .. }
+            | Self::RepairFindings { .. }
+            | Self::MarkLogsSeen(_)
+            | Self::SetPeriodic { .. } => "/hardware/diagnostico",
+            Self::NetworkCheck => "/rede/internet",
+            Self::CleanupClean(_) => "/armazenamento",
         }
     }
 
@@ -304,6 +455,49 @@ impl Operation {
                 if *ntp { "ativar" } else { "desativar" }
             ),
             Self::Read(query) => query.describe().to_owned(),
+            Self::DiagnosticsStart(tests) => format!(
+                "Executar o diagnóstico de saúde: {}",
+                tests
+                    .iter()
+                    .map(|id| crate::diagnostics_text::test_name(id))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+            Self::NetworkCheck => "Testar a conexão com a internet".to_owned(),
+            Self::DiagnosticsReport {
+                job: 0,
+                redact: false,
+            } => "Ler o último relatório do diagnóstico (inclui trechos do journal)".to_owned(),
+            Self::DiagnosticsReport { job, redact: false } => {
+                format!("Ler o relatório do diagnóstico {job} (inclui trechos do journal)")
+            }
+            Self::DiagnosticsReport { job, redact: true } => {
+                format!("Ler o relatório redigido do diagnóstico {job} para pedir ajuda")
+            }
+            Self::RepairFindings { findings, .. } => format!(
+                "Corrigir {} achado(s) do diagnóstico (um snapshot é criado antes)",
+                findings.len()
+            ),
+            Self::MarkLogsSeen(job) => {
+                format!("Marcar como vistos os logs registrados até o diagnóstico {job}")
+            }
+            Self::SetPeriodic { enabled: false, .. } => {
+                "Desligar a verificação periódica".to_owned()
+            }
+            Self::SetPeriodic {
+                enabled: true,
+                daily,
+            } => format!(
+                "Ligar a verificação periódica, {}",
+                if *daily { "todo dia" } else { "toda semana" }
+            ),
+            Self::CleanupClean(ids) => format!(
+                "Liberar espaço: {}",
+                ids.iter()
+                    .map(|id| crate::diagnostics_text::cleanup_name(id))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
         }
     }
 
@@ -367,6 +561,29 @@ impl Operation {
                 Self::datetime(timezone, "true")?;
                 named(14, Some(*ntp), timezone)
             }
+            Self::DiagnosticsStart(tests) => {
+                let list = tests.join(",");
+                Self::diagnostics_start(&list)?;
+                named(30, None, &list)
+            }
+            Self::NetworkCheck => Ok(vec![31]),
+            Self::DiagnosticsReport { job, redact } => Ok(job_bytes(32, Some(*redact), *job)),
+            Self::RepairFindings { job, findings } if *job > 0 => {
+                let text = Self::findings_text(findings);
+                Self::repair_findings(&job.to_string(), &text)?;
+                let mut bytes = job_bytes(33, None, *job);
+                bytes.extend_from_slice(text.as_bytes());
+                Ok(bytes)
+            }
+            Self::MarkLogsSeen(job) if *job > 0 => Ok(job_bytes(34, None, *job)),
+            Self::SetPeriodic { enabled, daily } => {
+                Ok(vec![35, u8::from(*enabled), u8::from(*daily)])
+            }
+            Self::CleanupClean(ids) => {
+                let list = ids.join(",");
+                Self::cleanup_clean(&list)?;
+                named(36, None, &list)
+            }
             _ => Err(invalid()),
         }
     }
@@ -384,7 +601,7 @@ impl Operation {
             [3] => Ok(Self::InstallNvidia),
             [9] => Ok(Self::UpdateAllNative),
             [12] => Ok(Self::ClearNativeCache),
-            [code @ 20..=24] => ReadQuery::from_code(*code)
+            [code @ 20..=26] => ReadQuery::from_code(*code)
                 .map(Self::Read)
                 .ok_or_else(invalid),
             [1, name @ ..] => Self::install(text(name)?),
@@ -408,6 +625,24 @@ impl Operation {
             [11, flag, name @ ..] => Self::repo_enabled(text(name)?, flag_text(flag)?),
             [13, flag, name @ ..] => Self::set_admin(text(name)?, flag_text(flag)?),
             [14, flag, name @ ..] => Self::datetime(text(name)?, flag_text(flag)?),
+            [30, list @ ..] => Self::diagnostics_start(text(list)?),
+            [31] => Ok(Self::NetworkCheck),
+            [32, flag, job @ ..] if job.len() == 4 => Self::diagnostics_report(
+                &u32::from_be_bytes(job.try_into().map_err(|_| invalid())?).to_string(),
+                flag_text(flag)?,
+            ),
+            [33, a, b, c, d, list @ ..] => Self::repair_findings(
+                &u32::from_be_bytes([*a, *b, *c, *d]).to_string(),
+                text(list)?,
+            ),
+            [34, a, b, c, d] => {
+                Self::mark_logs_seen(&u32::from_be_bytes([*a, *b, *c, *d]).to_string())
+            }
+            [35, enabled, daily @ (0 | 1)] => Self::set_periodic(
+                flag_text(enabled)?,
+                if *daily == 1 { "daily" } else { "weekly" },
+            ),
+            [36, list @ ..] => Self::cleanup_clean(text(list)?),
             _ => Err(invalid()),
         }
     }
@@ -708,8 +943,121 @@ mod tests {
             &[14, 1][..],
             &[13, 0, b'R'][..],
             &[15][..],
-            &[25][..],
+            &[27][..],
             &[20, 0][..],
+        ] {
+            assert!(Operation::decode(forged).is_err(), "{forged:?}");
+        }
+    }
+
+    #[test]
+    fn diagnostics_and_cleanup_operations_round_trip_with_fixed_fields_only() {
+        let operations = [
+            Operation::diagnostics_start(
+                "packages,disk-health,logs,platform,security,boot,network",
+            )
+            .unwrap(),
+            Operation::diagnostics_start("cpu-stress").unwrap(),
+            Operation::NetworkCheck,
+            Operation::diagnostics_report("42", "false").unwrap(),
+            Operation::diagnostics_report("4294967295", "true").unwrap(),
+            Operation::repair_findings("7", "logs:0,security:2,network:10").unwrap(),
+            Operation::repair_findings(
+                "7",
+                "packages:0,packages:1,packages:2,packages:3,disk-health:0,disk-health:1,\
+                 memory-stress:0,memory-stress:1,cpu-stress:0,disk-bench:0,platform:0,\
+                 platform:999,security:0,security:1,network:0,boot:0",
+            )
+            .unwrap(),
+            Operation::mark_logs_seen("9").unwrap(),
+            Operation::set_periodic("true", "daily").unwrap(),
+            Operation::set_periodic("false", "weekly").unwrap(),
+            Operation::cleanup_clean("journal,package-cache").unwrap(),
+            Operation::cleanup_clean(
+                "coredumps,journal,package-cache,flatpak-unused,old-kernels,snapshots",
+            )
+            .unwrap(),
+            Operation::Read(ReadQuery::LastPeriodic),
+            Operation::Read(ReadQuery::CleanupScan),
+        ];
+        for operation in operations {
+            let encoded = operation.encode().unwrap();
+            assert!(encoded.len() <= MAX_OPERATION, "{operation:?}");
+            assert_eq!(Operation::decode(&encoded).unwrap(), operation);
+            assert!(operation.action_id().starts_with("org.lyraos.vega."));
+            assert!(operation.return_href().starts_with('/'));
+            assert!(!operation.describe().is_empty());
+            let frame = encode_request(&request(operation.clone())).unwrap();
+            assert_eq!(
+                read_request(&mut frame.as_slice()).unwrap().operation,
+                operation
+            );
+        }
+        assert_eq!(
+            Operation::NetworkCheck.action_id(),
+            "org.lyraos.vega.network.diagnose"
+        );
+        for tests in [
+            "",
+            "network",
+            "../../etc",
+            "logs,logs",
+            "logs,",
+            "Logs",
+            "gpu",
+        ] {
+            assert!(Operation::diagnostics_start(tests).is_err(), "{tests:?}");
+        }
+        for job in ["", "0", "-1", "1e3", "4294967296", " 1", "00"] {
+            assert!(Operation::mark_logs_seen(job).is_err(), "{job:?}");
+            if job != "0" {
+                assert!(
+                    Operation::diagnostics_report(job, "true").is_err(),
+                    "{job:?}"
+                );
+            }
+        }
+        let latest = Operation::diagnostics_report("0", "false").unwrap();
+        assert_eq!(
+            Operation::decode(&latest.encode().unwrap()).unwrap(),
+            latest
+        );
+        for findings in [
+            "",
+            "logs",
+            "logs:",
+            "logs:1000",
+            "logs:-1",
+            "logs:0,logs:0",
+            "etc:0",
+            "logs:0;security:1",
+        ] {
+            assert!(
+                Operation::repair_findings("1", findings).is_err(),
+                "{findings:?}"
+            );
+        }
+        let seventeen: Vec<String> = (0..17).map(|i| format!("logs:{i}")).collect();
+        assert!(Operation::repair_findings("1", &seventeen.join(",")).is_err());
+        assert!(Operation::set_periodic("true", "monthly").is_err());
+        assert!(Operation::set_periodic("yes", "weekly").is_err());
+        for categories in ["", "home-cache", "journal,journal", "trash", "journal;rm"] {
+            assert!(
+                Operation::cleanup_clean(categories).is_err(),
+                "{categories:?}"
+            );
+        }
+        for forged in [
+            &[30u8][..],
+            &[30, b'n', b'e', b't', b'w', b'o', b'r', b'k'][..],
+            &[31, 0][..],
+            &[32, 2, 0, 0, 0, 1][..],
+            &[32, 0, 0, 0, 1][..],
+            &[33, 0, 0, 0, 1][..],
+            &[34, 0, 0, 0, 0][..],
+            &[35, 1, 2][..],
+            &[36, b'x'][..],
+            &[27][..],
         ] {
             assert!(Operation::decode(forged).is_err(), "{forged:?}");
         }

@@ -17,7 +17,9 @@ pub async fn handler(
 ) -> Html<String> {
     let actions = Actions::new(&state, &jar, &user);
     let mut body = String::new();
-    body.push_str("<p><a href=\"/hardware/nvidia\">NVIDIA</a></p>");
+    body.push_str(
+        "<p><a href=\"/hardware/diagnostico\">Diagnóstico de saúde</a> · <a href=\"/hardware/nvidia\">NVIDIA</a></p>",
+    );
 
     match state.dbus.hardware().inventory().await {
         Ok(inventory) => body.push_str(&format!(

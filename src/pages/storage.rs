@@ -1,5 +1,6 @@
 use axum::extract::{Extension, State};
 use axum::response::Html;
+use axum_extra::extract::PrivateCookieJar;
 use lyra_vega_dbus::StorageClient;
 
 use crate::auth::CurrentUser;
@@ -10,9 +11,10 @@ use super::{error_body, html_escape, render};
 
 pub async fn handler(
     State(state): State<AppState>,
+    jar: PrivateCookieJar,
     Extension(user): Extension<CurrentUser>,
 ) -> Html<String> {
-    let body = match state.dbus.storage().list().await {
+    let mut body = match state.dbus.storage().list().await {
         Ok(volumes) => {
             let rows: String = volumes
                 .iter()
@@ -39,6 +41,7 @@ pub async fn handler(
         }
         Err(error) => error_body("Lista de volumes indisponível", error),
     };
+    body.push_str(&super::diagnostics::cleanup_section(&state, &jar, &user));
 
     render("Armazenamento", "/armazenamento", &user, body)
 }

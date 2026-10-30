@@ -34,6 +34,17 @@ scripts/dev-uninstall.sh  # reverte
 
 Licenciado sob GPL-3.0.
 
+## Diagnóstico, rede e Liberar espaço
+
+Hardware e Kernel → Diagnóstico de saúde (`/hardware/diagnostico`) roda o
+modo rápido ou um teste avulso, mostra o relatório (boot por fase, rede passo
+a passo, achados e o que fazer), corrige achados escolhidos, marca os logs
+como vistos, ajusta a verificação periódica e monta o texto **redigido** do
+Pedir ajuda. Rede → Minha internet não funciona (`/rede/internet`) testa a
+conexão com uma senha só. Armazenamento → Liberar espaço mede e limpa as
+categorias do sistema. Tudo que não é público passa pelo broker, com a senha
+do usuário de `wheel`. Requer vegad >= 5.6.2 (add-web-diagnostics).
+
 ## Instalação NVIDIA opcional
 
 Em Hardware e Kernel → NVIDIA (`/hardware/nvidia`), consulte o driver e a recuperação sem privilégios. A instalação

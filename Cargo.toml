@@ -1,6 +1,6 @@
 [package]
 name = "vega-web"
-version = "5.1.25"
+version = "5.2.0"
 edition = "2024"
 license = "GPL-3.0"
 authors = ["Rodrigo Brito"]
@@ -14,7 +14,7 @@ codegen-units = 1
 strip = "debuginfo"
 
 [dependencies]
-lyra-vega-dbus = { git = "https://github.com/lyra-os-linux/lyra-vega-dbus", rev = "5d559f9f1f95916a33befe23af6da6084012e000" }
+lyra-vega-dbus = { git = "https://github.com/lyra-os-linux/lyra-vega-dbus", rev = "7333f576c36fd7657125f7d72d8386a5186aea85" }
 tokio = { version = "1.48.0", features = ["rt-multi-thread", "macros", "signal", "net", "io-util", "process"] }
 axum = { version = "0.8.9", features = ["ws"] }
 axum-server = { version = "0.8.0", features = ["tls-rustls-no-provider"] }
@@ -29,6 +29,7 @@ gettext-rs = { version = "0.7.7", features = ["gettext-system"] }
 zeroize = { version = "1.9.0", features = ["std"] }
 zbus = "5.19.0"
 serde_json = "1"
+serde_urlencoded = "0.7"
 
 [dev-dependencies]
 futures-util = { version = "0.3.34", features = ["sink"] }

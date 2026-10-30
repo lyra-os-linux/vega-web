@@ -196,6 +196,9 @@ pub async fn handler(
         }
         Err(_) => health.push_str(&kv("warn", "Atualizações", "indisponível")),
     }
+    if let Some((dot, value)) = super::diagnostics::dashboard_row(&state).await {
+        health.push_str(&kv(&dot, "Verificação periódica", &value));
+    }
     if !machine.kernel.is_empty() {
         health.push_str(&kv("", "Kernel", &html_escape(&machine.kernel)));
     }

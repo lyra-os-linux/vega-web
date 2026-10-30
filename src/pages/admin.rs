@@ -77,9 +77,51 @@ pub struct ActionForm {
     enabled: Option<String>,
     timezone: Option<String>,
     ntp: Option<String>,
+    tests: Option<String>,
+    job: Option<String>,
+    redact: Option<String>,
+    findings: Option<String>,
+    frequency: Option<String>,
+    categories: Option<String>,
 }
 
 impl ActionForm {
+    /// A form built by a page that collects a list (checkboxes) before the
+    /// confirmation step; `fields` are the same names a posted form carries.
+    pub(crate) fn built(action: &str, csrf: &str, fields: &[(&str, String)]) -> Self {
+        let mut form = Self {
+            action: action.to_owned(),
+            csrf: csrf.to_owned(),
+            password: None,
+            package: None,
+            port: None,
+            protocol: None,
+            confirmed: None,
+            language: None,
+            name: None,
+            enabled: None,
+            timezone: None,
+            ntp: None,
+            tests: None,
+            job: None,
+            redact: None,
+            findings: None,
+            frequency: None,
+            categories: None,
+        };
+        for (field, value) in fields {
+            let value = Some(value.clone());
+            match *field {
+                "job" => form.job = value,
+                "findings" => form.findings = value,
+                "categories" => form.categories = value,
+                "tests" => form.tests = value,
+                _ => {}
+            }
+        }
+        form
+    }
+
     /// Every variant checks that only its own parameters are present, so a
     /// forged form cannot smuggle extra fields into another operation.
     fn operation(&self) -> Option<Operation> {
@@ -94,6 +136,12 @@ impl ActionForm {
                 ("enabled", self.enabled.is_some()),
                 ("timezone", self.timezone.is_some()),
                 ("ntp", self.ntp.is_some()),
+                ("tests", self.tests.is_some()),
+                ("job", self.job.is_some()),
+                ("redact", self.redact.is_some()),
+                ("findings", self.findings.is_some()),
+                ("frequency", self.frequency.is_some()),
+                ("categories", self.categories.is_some()),
             ];
             present
                 .iter()
@@ -101,6 +149,7 @@ impl ActionForm {
         };
         let name = || self.name.as_deref();
         let enabled = || self.enabled.as_deref();
+        let job = || self.job.as_deref();
         if let Some(key) = self.action.strip_prefix("read-") {
             return no_extras(&[])
                 .then(|| ReadQuery::from_key(key))
@@ -139,6 +188,23 @@ impl ActionForm {
             "datetime" if no_extras(&["timezone", "ntp"]) => {
                 Operation::datetime(self.timezone.as_deref()?, self.ntp.as_deref()?).ok()
             }
+            "diagnostics-start" if no_extras(&["tests"]) => {
+                Operation::diagnostics_start(self.tests.as_deref()?).ok()
+            }
+            "network-check" if no_extras(&[]) => Some(Operation::NetworkCheck),
+            "diagnostics-report" if no_extras(&["job", "redact"]) => {
+                Operation::diagnostics_report(job()?, self.redact.as_deref()?).ok()
+            }
+            "repair-findings" if no_extras(&["job", "findings"]) => {
+                Operation::repair_findings(job()?, self.findings.as_deref()?).ok()
+            }
+            "mark-logs-seen" if no_extras(&["job"]) => Operation::mark_logs_seen(job()?).ok(),
+            "set-periodic" if no_extras(&["enabled", "frequency"]) => {
+                Operation::set_periodic(enabled()?, self.frequency.as_deref()?).ok()
+            }
+            "cleanup-clean" if no_extras(&["categories"]) => {
+                Operation::cleanup_clean(self.categories.as_deref()?).ok()
+            }
             "install-nvidia"
                 if no_extras(&["confirmed", "language"])
                     && self.confirmed.as_deref() == Some("yes")
@@ -167,6 +233,12 @@ impl ActionForm {
             ("enabled", self.enabled.as_deref()),
             ("timezone", self.timezone.as_deref()),
             ("ntp", self.ntp.as_deref()),
+            ("tests", self.tests.as_deref()),
+            ("job", self.job.as_deref()),
+            ("redact", self.redact.as_deref()),
+            ("findings", self.findings.as_deref()),
+            ("frequency", self.frequency.as_deref()),
+            ("categories", self.categories.as_deref()),
         ] {
             if let Some(value) = value {
                 fields.push_str(&format!(
@@ -238,7 +310,7 @@ pub async fn confirm(
     render("Confirmar ação", operation.return_href(), &user, body).into_response()
 }
 
-fn matching_csrf(expected: &str, received: &str) -> bool {
+pub(crate) fn matching_csrf(expected: &str, received: &str) -> bool {
     expected.len() == received.len()
         && expected
             .bytes()
@@ -382,6 +454,25 @@ pub async fn execute(
     } else {
         None
     };
+    let pending_cleanup = if matches!(operation, Operation::CleanupClean(_)) {
+        match super::diagnostics::prepare_cleanup(&state, lease.admin_binding).await {
+            Ok(pending) => Some(pending),
+            Err(error) => {
+                return (
+                    StatusCode::CONFLICT,
+                    render(
+                        "Liberar espaço",
+                        "/armazenamento",
+                        &user,
+                        format!(r#"<p class="notice warn">{}</p>"#, html_escape(&error)),
+                    ),
+                )
+                    .into_response();
+            }
+        }
+    } else {
+        None
+    };
     let outcome = tokio::select! {
         biased;
         _ = lease.revoked() => {
@@ -399,6 +490,19 @@ pub async fn execute(
             state
                 .audit
                 .record(&username, &ip, operation.describe());
+            if let Some(pending) = pending_cleanup {
+                return pending.accepted(result.transaction, lease);
+            }
+            if let Some(response) = super::diagnostics::accepted(
+                &state,
+                &jar,
+                &user,
+                &operation,
+                result.transaction,
+                &result.payload,
+            ) {
+                return response;
+            }
             if let Operation::Read(query) = &operation {
                 if let (Some(cookie), Ok(json)) = (
                     jar.get(SESSION_COOKIE),

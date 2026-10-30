@@ -2,6 +2,7 @@ pub mod admin;
 pub mod backup;
 pub mod dashboard;
 pub mod datetime;
+pub mod diagnostics;
 pub mod hardware;
 pub mod logs;
 pub mod monitor;
