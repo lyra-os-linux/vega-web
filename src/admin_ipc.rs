@@ -28,7 +28,6 @@ const MAX_NAME: usize = 200;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Operation {
     InstallNative(String),
-    InstallNvidia,
     AddPort {
         port: u16,
         tcp: bool,
@@ -326,7 +325,7 @@ impl Operation {
 
     pub fn action_id(&self) -> &'static str {
         match self {
-            Self::InstallNative(_) | Self::InstallNvidia => "org.lyraos.vega.software.install",
+            Self::InstallNative(_) => "org.lyraos.vega.software.install",
             Self::UpdateAllNative => "org.lyraos.vega.software.update",
             Self::RemoveNative(_) => "org.lyraos.vega.software.remove",
             Self::RepoEnabled { .. } => "org.lyraos.vega.software.manage-repos",
@@ -360,7 +359,6 @@ impl Operation {
             | Self::RemoveNative(_)
             | Self::RepoEnabled { .. }
             | Self::ClearNativeCache => "/software",
-            Self::InstallNvidia => "/hardware/nvidia",
             Self::AddPort { .. } | Self::RemovePort { .. } | Self::FirewallService { .. } => {
                 "/rede"
             }
@@ -385,7 +383,6 @@ impl Operation {
         let proto = |tcp: &bool| if *tcp { "tcp" } else { "udp" };
         match self {
             Self::InstallNative(name) => format!("Instalar o pacote {name}"),
-            Self::InstallNvidia => "Instalar o driver NVIDIA oficial".to_owned(),
             Self::AddPort { port, tcp } => {
                 format!("Abrir a porta {port}/{} no firewall", proto(tcp))
             }
@@ -511,7 +508,6 @@ impl Operation {
             Ok(bytes)
         };
         match self {
-            Self::InstallNvidia => Ok(vec![3]),
             Self::InstallNative(name) => {
                 Self::install(name)?;
                 named(1, None, name)
@@ -598,7 +594,6 @@ impl Operation {
             _ => Err(invalid()),
         };
         match bytes {
-            [3] => Ok(Self::InstallNvidia),
             [9] => Ok(Self::UpdateAllNative),
             [12] => Ok(Self::ClearNativeCache),
             [code @ 20..=26] => ReadQuery::from_code(*code)
@@ -822,21 +817,21 @@ pub async fn execute(path: &Path, request: Request) -> io::Result<Completed> {
 mod tests {
     use super::*;
 
+    /// Code 3 belonged to the retired NVIDIA installation. It stays reserved:
+    /// no operation encodes to it, and the broker refuses it while reading
+    /// the request, before PAM, Polkit or any D-Bus call.
     #[test]
-    fn nvidia_is_a_distinct_parameter_free_operation() {
-        let operation = Operation::InstallNvidia;
-        assert_eq!(
-            Operation::decode(&operation.encode().unwrap()).unwrap(),
-            operation
-        );
-        assert_eq!(operation.action_id(), "org.lyraos.vega.software.install");
-        for forged in [&[3, 0][..], &[3, 1][..], &[3, b'-', b'f'][..]] {
-            assert!(Operation::decode(forged).is_err())
+    fn retired_nvidia_code_is_reserved_and_refused() {
+        for forged in [&[3][..], &[3, 0][..], &[3, 1][..], &[3, b'-', b'f'][..]] {
+            assert!(Operation::decode(forged).is_err(), "{forged:?}");
         }
-        let frame = encode_request(&request(operation.clone())).unwrap();
-        let parsed = read_request(&mut frame.as_slice()).unwrap();
-        assert_eq!(parsed.operation, operation);
-        assert_eq!(parsed.session, [7; 32]);
+        let mut frame = encode_request(&request(Operation::UpdateAllNative))
+            .unwrap()
+            .to_vec();
+        let last = frame.len() - 1;
+        assert_eq!(frame[last], 9);
+        frame[last] = 3;
+        assert!(read_request(&mut frame.as_slice()).is_err());
     }
 
     fn request(operation: Operation) -> Request {

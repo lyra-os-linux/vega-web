@@ -469,9 +469,6 @@ fn worker() -> Result<()> {
                 Operation::Read(query) => {
                     Ok::<_, Box<dyn std::error::Error>>((0, read_payload(&dbus, query).await?))
                 }
-                Operation::InstallNvidia => {
-                    Ok((dbus.software().install_nvidia(true).await?, Vec::new()))
-                }
                 Operation::InstallNative(name) => Ok((
                     dbus.software().install("official", &name).await?,
                     Vec::new(),

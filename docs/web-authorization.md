@@ -33,6 +33,8 @@ O protocolo binário limita campos e prazos: cinco segundos por leitura de
 pedido, usuário até 256 bytes e senha até 4096 bytes. Aceita somente nome
 simples de pacote ou porta única 1–65535 e protocolo TCP/UDP. Não aceita
 flags, URLs, caminhos, seletores de repositório ou comandos de shell.
+O código de operação 3, da antiga instalação NVIDIA, fica reservado: não é
+reaproveitado e é recusado na leitura do pedido, antes do PAM e do D-Bus.
 
 PAM autentica e valida a conta no serviço fixo `vega-web`. O helper rejeita
 root, a conta HTTPS, nomes remapeados pelo PAM e contas fora de `wheel`.
