@@ -140,7 +140,6 @@ async fn authorization_integration_rejects_writes_without_calling_daemon() {
     let key = Key::generate();
     let sessions = SessionStore::new(SessionPolicy::default());
     let state = AppState {
-        nvidia_jobs: Default::default(),
         cleanup_jobs: Default::default(),
         dbus,
         sessions: sessions.clone(),
@@ -245,7 +244,6 @@ async fn authorization_integration_admin_frontdoor_rejects_forgery_before_broker
     assert_ne!(alice.csrf, bob.csrf);
     assert_ne!(alice.admin_binding, bob.admin_binding);
     let state = AppState {
-        nvidia_jobs: Default::default(),
         cleanup_jobs: Default::default(),
         dbus: lyra_vega_dbus::VegaDbus::connect().await.unwrap(),
         sessions: sessions.clone(),
@@ -282,37 +280,10 @@ async fn authorization_integration_admin_frontdoor_rejects_forgery_before_broker
         .collect();
     assert!(!response.contains(&binding_hex));
     for (status, body) in [
-        (
-            403,
-            "action=install-nvidia&confirmed=yes&language=en&csrf=forged&password=secret".into(),
-        ),
+        // The retired NVIDIA action is an unknown operation like any other.
         (
             400,
-            format!(
-                "action=install-nvidia&language=en&csrf={}&password=secret",
-                alice.csrf
-            ),
-        ),
-        (
-            400,
-            format!(
-                "action=install-nvidia&confirmed=no&language=en&csrf={}&password=secret",
-                alice.csrf
-            ),
-        ),
-        (
-            400,
-            format!(
-                "action=install-nvidia&confirmed=yes&language=en&package=evil&csrf={}&password=secret",
-                alice.csrf
-            ),
-        ),
-        (
-            400,
-            format!(
-                "action=install-nvidia&confirmed=yes&language=invalid&csrf={}&password=secret",
-                alice.csrf
-            ),
+            format!("action=install-nvidia&csrf={}&password=secret", alice.csrf),
         ),
         (
             403,
@@ -357,6 +328,20 @@ async fn authorization_integration_admin_frontdoor_rejects_forgery_before_broker
             "{response}"
         );
         assert!(!response.contains("secret"));
+    }
+    // Its fields no longer exist: the form is refused before validation.
+    let body = format!(
+        "action=install-nvidia&confirmed=yes&language=en&csrf={}&password=secret",
+        alice.csrf
+    );
+    let response = request(address, "POST", "/administracao", &cookie, &body).await;
+    assert!(response.starts_with("HTTP/1.1 422"), "{response}");
+    assert!(!response.contains("secret"));
+    // The NVIDIA pages were removed, not hidden: an authenticated session
+    // gets 404, like any route that does not exist.
+    for path in ["/hardware/nvidia", "/hardware/nvidia/progress/00"] {
+        let response = request(address, "GET", path, &cookie, "").await;
+        assert!(response.starts_with("HTTP/1.1 404"), "{path}: {response}");
     }
     for identity in [
         "username=root",

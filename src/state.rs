@@ -374,7 +374,6 @@ fn local_clock() -> String {
 
 #[derive(Clone)]
 pub struct AppState {
-    pub nvidia_jobs: crate::pages::nvidia::Jobs,
     pub cleanup_jobs: crate::pages::diagnostics::CleanupJobs,
     pub dbus: VegaDbus,
     pub sessions: SessionStore,

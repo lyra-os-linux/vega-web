@@ -994,8 +994,8 @@ checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
 
 [[package]]
 name = "lyra-vega-dbus"
-version = "5.1.22"
-source = "git+https://github.com/lyra-os-linux/lyra-vega-dbus?rev=7333f576c36fd7657125f7d72d8386a5186aea85#7333f576c36fd7657125f7d72d8386a5186aea85"
+version = "5.2.0"
+source = "git+https://github.com/lyra-os-linux/lyra-vega-dbus?rev=63cfb0c1f231dfce287fc143cac330f0276d2adc#63cfb0c1f231dfce287fc143cac330f0276d2adc"
 dependencies = [
  "async-io",
  "async-lock",
@@ -1944,7 +1944,7 @@ dependencies = [
 
 [[package]]
 name = "vega-web"
-version = "5.2.0"
+version = "5.3.0"
 dependencies = [
  "axum",
  "axum-extra",

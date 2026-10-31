@@ -236,7 +236,7 @@ pub const GUIDE: &[Guide] = &[
     (
         "gpu.bench-failed",
         "Confira o estado do driver da GPU.",
-        Some(("/hardware/nvidia", "Ver NVIDIA")),
+        None,
     ),
     (
         "power.abort",
