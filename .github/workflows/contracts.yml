@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   security-contracts:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Install session integration and disposable VM dependencies
         run: |
@@ -74,7 +74,7 @@ jobs:
           bash scripts/check-dbus-pin.sh
 
   packaging:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     container: opensuse/tumbleweed:latest
     steps:
       - name: Install packaging validators
