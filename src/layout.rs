@@ -554,6 +554,11 @@ const NAV: &[NavGroup] = &[
         label: "Diagnóstico",
         items: &[
             NavItem {
+                href: "/hardware/diagnostico",
+                label: "Saúde",
+                icon: "check",
+            },
+            NavItem {
                 href: "/logs",
                 label: "Logs",
                 icon: "logs",

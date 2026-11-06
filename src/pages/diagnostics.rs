@@ -237,7 +237,7 @@ pub async fn handler(
 
     body.push_str(&periodic_section(&state, &jar, &actions).await);
 
-    let mut response = render("Diagnóstico de saúde", "/hardware", &user, body).into_response();
+    let mut response = render("Diagnóstico de saúde", PAGE, &user, body).into_response();
     if running {
         response
             .headers_mut()
@@ -358,7 +358,7 @@ pub async fn report(
                 &[("job", &job.to_string()), ("redact", "false")]
             )
         );
-        return render("Relatório do diagnóstico", "/hardware", &user, body).into_response();
+        return render("Relatório do diagnóstico", PAGE, &user, body).into_response();
     };
     let remedies = state
         .dbus
@@ -368,7 +368,7 @@ pub async fn report(
         .unwrap_or_default();
     let csrf = csrf_token(&state, &jar, &user);
     let body = report_body(job, &report, &remedies, &actions, csrf.as_deref());
-    render("Relatório do diagnóstico", "/hardware", &user, body).into_response()
+    render("Relatório do diagnóstico", PAGE, &user, body).into_response()
 }
 
 fn report_body(
@@ -700,7 +700,7 @@ async fn help(
                 &[("job", &job.to_string()), ("redact", "true")]
             )
         );
-        return render("Pedir ajuda", "/hardware", &user, body).into_response();
+        return render("Pedir ajuda", PAGE, &user, body).into_response();
     };
     let Some(csrf) = csrf_token(&state, &jar, &user) else {
         return Redirect::to("/login").into_response();
@@ -750,7 +750,7 @@ async fn help(
         html_escape(&description),
         html_escape(&help),
     );
-    render("Pedir ajuda", "/hardware", &user, body).into_response()
+    render("Pedir ajuda", PAGE, &user, body).into_response()
 }
 
 /// Rede e Firewall → Minha internet não funciona.
