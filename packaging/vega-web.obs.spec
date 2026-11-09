@@ -30,7 +30,7 @@ BuildRequires:  cargo
 BuildRequires:  rust
 BuildRequires:  pam-devel
 BuildRequires:  sysuser-tools
-Requires:       vegad >= 5.1.29
+Requires:       vegad >= 5.10.0
 Requires:       pam
 Requires:       polkit
 Requires(pre):    systemd

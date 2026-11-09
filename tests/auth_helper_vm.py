@@ -4,6 +4,7 @@ import concurrent.futures
 import http.client
 import json
 import os
+import re
 from pathlib import Path
 import shutil
 import socket
@@ -199,10 +200,15 @@ Environment=VEGA_WEB_LOGIN_MAX_DELAY_SECS=1
 
 def authentication():
     cookie = successful_login()
-    response = request('POST', '/terminal', {'password': PASSWORD}, cookie)
+    page = request('GET', '/terminal', cookie=cookie)[2]
+    csrf = re.search(r'name="csrf" value="([0-9a-f]{64})"', page).group(1)
+    # vega-web#35: reauthentication and logout require the session's token.
+    assert request('POST', '/terminal', {'password': PASSWORD}, cookie)[0] == 403
+    response = request('POST', '/terminal', {'password': PASSWORD, 'csrf': csrf}, cookie)
     assert response[0] == 303 and response[1].get('location') == '/terminal', response[:2]
     assert '/assets/xterm.js' in request('GET', '/terminal', cookie=cookie)[2]
-    assert request('POST', '/logout', cookie=cookie)[0] == 303
+    assert request('POST', '/logout', cookie=cookie)[0] == 403
+    assert request('POST', '/logout', {'csrf': csrf}, cookie)[0] == 303
     assert request('GET', '/software', cookie=cookie)[1].get('location') == '/login'
     denied(login(password='wrong'))
     original = Path('/etc/shadow').read_text()
@@ -275,7 +281,9 @@ def rate_limit():
     assert 'Muitas tentativas' in login()[2]
     assert 'Muitas tentativas' in login(source='127.0.0.2')[2]
     assert 'Muitas tentativas' in login(user='bob')[2]
-    assert request('POST', '/terminal', {'password': PASSWORD}, cookie)[0] == 429
+    page = request('GET', '/terminal', cookie=cookie)[2]
+    csrf = re.search(r'name="csrf" value="([0-9a-f]{64})"', page).group(1)
+    assert request('POST', '/terminal', {'password': PASSWORD, 'csrf': csrf}, cookie)[0] == 429
     assert accepted() == before, 'blocked requests reached PAM'
     successful_login('bob', source='127.0.0.2')
     time.sleep(5.2)
