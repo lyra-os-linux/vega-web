@@ -110,7 +110,8 @@ def main():
     vm.put('/etc/shadow', 'root:!:20000:0:99999:7:::\nvega-web:!:20000:0:99999:7:::\npolkitd:!:20000:0:99999:7:::\n'
            f'alice:{password_hash}:20000:0:99999:7:::\nbob:{password_hash}:20000:0:99999:7:::\n', 0o600)
     # No host passwords, repository credentials, local policies or disks.
-    vm.put('/etc/os-release', 'ID=opensuse-leap\nVERSION_ID=16.1\nPRETTY_NAME="Vega administrative test VM"\n')
+    # vegad runs only on Lyra OS (vegad#132): the VM is a Lyra OS Server.
+    vm.put('/etc/os-release', 'ID=lyra-os-server\nID_LIKE="opensuse suse"\nVERSION_ID=16.1\nPRETTY_NAME="Vega administrative test VM"\n')
     vm.put('/etc/hosts', '127.0.0.1 localhost\n')
     for name in ['protocols', 'services']:
         source = next((Path(base) / name for base in ['/etc', '/usr/etc', '/usr/share/netcfg']
