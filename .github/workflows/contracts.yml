@@ -52,8 +52,8 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           repository: lyra-os-linux/vegad
-          # vegad v5.9.0: Diagnostics and Cleanup, which the broker drives.
-          ref: f7152c925dfc6325758dcb93fe187277f1719261
+          # vegad 5.10.0: the daemon that ships with this panel (Lyra OS only).
+          ref: 0865af1e0da582b8bde694ddf7ddaa8aeb705083
           path: target/vegad-contract-source
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
