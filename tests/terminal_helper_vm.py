@@ -10,6 +10,7 @@ import subprocess
 import time
 
 SOCKET = '/run/vega-web-terminal.sock'
+PASSWORD = 'Vega-test-only-73!'
 SERVICE_UID = 998
 ALICE_UID = 1001
 HOME = Path('/home/alice')
@@ -32,7 +33,7 @@ def wheel(enabled=True):
         + '\nalice:x:1001:\nbob:x:1002:\n')
 
 
-def connect(username='alice', uid=SERVICE_UID, rejecting=False):
+def connect(username='alice', uid=SERVICE_UID, rejecting=False, password=PASSWORD):
     # SO_PEERCRED is captured at connect, performed by the actual service UID.
     # Pass the established descriptor back to the root test observer so it can
     # inspect process/cgroup state without changing the helper's peer identity.
@@ -62,9 +63,17 @@ def connect(username='alice', uid=SERVICE_UID, rejecting=False):
     descriptors.frombytes(ancdata[0][2][:descriptors.itemsize])
     peer = socket.socket(fileno=descriptors[0])
     peer.settimeout(5)
-    name = username.encode()
+    name, secret = username.encode(), password.encode()
     try:
-        peer.sendall(b'U' + struct.pack('!H', len(name)) + name)
+        # Credentials frame; the helper answers 0 after PAM, then waits for G.
+        peer.sendall(b'A' + struct.pack('!H', len(name)) + name
+                     + struct.pack('!H', len(secret)) + secret)
+        answer = peer.recv(1)
+        if rejecting:
+            assert answer in (b'', b'\x01'), f'accepted forbidden identity {username}/{uid}'
+            return peer
+        assert answer == b'\x00', f'authentication refused for {username}: {answer!r}'
+        peer.sendall(b'G')
     except (BrokenPipeError, ConnectionResetError):
         if not rejecting:
             raise
@@ -232,8 +241,11 @@ def test_shell_exit():
 
 
 def test_identity_rejection():
-    for username, uid in [('alice', 0), ('root', SERVICE_UID), ('bob', SERVICE_UID)]:
-        peer = connect(username, uid, rejecting=True)
+    # Wrong UID, root, a non-wheel user and, since vega-web#34, a wrong
+    # password: the root helper itself refuses, whatever vega-web claims.
+    for username, uid, password in [('alice', 0, PASSWORD), ('root', SERVICE_UID, PASSWORD),
+                                    ('bob', SERVICE_UID, PASSWORD), ('alice', SERVICE_UID, 'wrong-password')]:
+        peer = connect(username, uid, rejecting=True, password=password)
         try:
             assert peer.recv(4096) == b'', f'accepted forbidden identity {username}/{uid}'
         except ConnectionResetError:
@@ -245,6 +257,8 @@ def main():
     assert os.geteuid() == 0
     assert Path('/run/vega-terminal-test-vm').is_file(), 'guest-only test'
     assert 'ID=lyra-terminal-test-vm' in Path('/etc/os-release').read_text(), 'guest-only test'
+    for directory in [Path('/run/faillock'), Path('/var/lib/faillock')]:
+        directory.mkdir(parents=True, exist_ok=True)
     for directory, uid in [(HOME, ALICE_UID), (Path('/home/bob'), 1002)]:
         directory.mkdir(parents=True, exist_ok=True)
         os.chown(directory, uid, uid)
