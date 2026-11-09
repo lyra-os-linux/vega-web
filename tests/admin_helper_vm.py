@@ -303,7 +303,7 @@ Environment=VEGA_WEB_LOGIN_MAX_DELAY_SECS=1
                 until(entered.exists)
                 if mode == 'logout':
                     start = time.monotonic()
-                    assert http('POST', '/logout', cookie=cookie)[0] == 303
+                    assert http('POST', '/logout', {'csrf': csrf}, cookie)[0] == 303
                     assert time.monotonic() - start < 2
                 assert pending.result(timeout=5)[0] == 401
         finally:

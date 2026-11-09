@@ -43,7 +43,7 @@ como vistos, ajusta a verificação periódica e monta o texto **redigido** do
 Pedir ajuda. Rede → Minha internet não funciona (`/rede/internet`) testa a
 conexão com uma senha só. Armazenamento → Liberar espaço mede e limpa as
 categorias do sistema. Tudo que não é público passa pelo broker, com a senha
-do usuário de `wheel`. Requer vegad >= 5.6.2 (add-web-diagnostics).
+do usuário de `wheel`. Requer vegad >= 5.10.0 (contrato lyra-vega-dbus 5.4.0).
 
 ## Driver NVIDIA
 

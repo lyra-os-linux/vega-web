@@ -7,7 +7,7 @@ use axum_server::tls_rustls::RustlsConfig;
 /// Garante que existe um par certificado/chave autoassinado em `tls_dir`,
 /// gerando um na primeira execução. O aviso de certificado não confiável no
 /// navegador é esperado (uso somente-LAN, sem CA pública) — ver
-/// docs/vega-web-privacidade.md.
+/// docs/privacidade.md.
 pub async fn ensure_self_signed(
     tls_dir: &Path,
     alt_names: &[String],
@@ -23,11 +23,17 @@ pub async fn ensure_self_signed(
         let expected = normalized_names(alt_names).join("\n") + "\n";
         match fs::read_to_string(&names_path) {
             Ok(current) if current == expected => {}
-            Ok(_) => {
-                return Err(std::io::Error::new(
-                    std::io::ErrorKind::InvalidInput,
-                    "certificado autoassinado incompatível com VEGA_WEB_TLS_NAMES; remova cert.pem/key.pem para regenerar com segurança",
-                ));
+            Ok(current) => {
+                // The certificate is the panel's own (it wrote the names
+                // file): the host was renamed or got another address. Make a
+                // new one instead of keeping the panel down (vega-web#37);
+                // the browser shows its untrusted-certificate warning again.
+                eprintln!(
+                    "vega-web: os nomes do certificado autoassinado mudaram ({} → {}); certificado regenerado",
+                    current.trim().replace('\n', ", "),
+                    expected.trim().replace('\n', ", ")
+                );
+                generate(tls_dir, &cert_path, &key_path, &names_path, alt_names)?;
             }
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
                 return Err(std::io::Error::new(
@@ -98,7 +104,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn generated_certificate_has_private_permissions_and_detects_name_change() {
+    async fn generated_certificate_is_private_and_regenerated_when_names_change() {
         let dir = std::env::temp_dir().join(format!("vega-tls-test-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         ensure_self_signed(&dir, &["server.local".into(), "10.0.0.2".into()], false)
@@ -108,10 +114,35 @@ mod tests {
             let mode = fs::metadata(dir.join(name)).unwrap().permissions().mode() & 0o777;
             assert_eq!(mode, 0o600);
         }
-        let error = ensure_self_signed(&dir, &["other.local".into()], false)
+        // vega-web#37: a renamed host gets a new self-signed certificate.
+        let before = fs::read(dir.join("cert.pem")).unwrap();
+        ensure_self_signed(&dir, &["other.local".into()], false)
+            .await
+            .unwrap();
+        assert_ne!(fs::read(dir.join("cert.pem")).unwrap(), before);
+        assert_eq!(
+            fs::read_to_string(dir.join("self-signed-names")).unwrap(),
+            "other.local\n"
+        );
+        for name in ["cert.pem", "key.pem"] {
+            let mode = fs::metadata(dir.join(name)).unwrap().permissions().mode() & 0o777;
+            assert_eq!(mode, 0o600);
+        }
+
+        // A certificate without the panel's names file is not its own: it is
+        // never replaced, and starting still refuses.
+        fs::remove_file(dir.join("self-signed-names")).unwrap();
+        let external = fs::read(dir.join("cert.pem")).unwrap();
+        let error = ensure_self_signed(&dir, &["third.local".into()], false)
             .await
             .unwrap_err();
         assert_eq!(error.kind(), std::io::ErrorKind::InvalidInput);
+        assert_eq!(fs::read(dir.join("cert.pem")).unwrap(), external);
+        // An externally managed certificate is used as is, whatever the names.
+        ensure_self_signed(&dir, &["fourth.local".into()], true)
+            .await
+            .unwrap();
+        assert_eq!(fs::read(dir.join("cert.pem")).unwrap(), external);
         fs::remove_dir_all(dir).unwrap();
     }
 }

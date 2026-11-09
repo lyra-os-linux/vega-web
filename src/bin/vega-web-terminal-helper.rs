@@ -1,5 +1,9 @@
 //! Broker root ativado por socket do terminal web. Não aceita comandos: abre
-//! apenas o shell cadastrado, depois de validar o peer e o grupo wheel.
+//! apenas o shell cadastrado, depois de validar o peer, a senha do usuário
+//! (PAM, como o broker administrativo) e o grupo wheel.
+
+#[path = "../pam_ffi.rs"]
+mod pam_ffi;
 
 use std::ffi::{CStr, CString};
 use std::io;
@@ -7,6 +11,10 @@ use std::os::fd::RawFd;
 use std::ptr;
 
 const MAX_INPUT: usize = 64 * 1024;
+const MAX_USERNAME: usize = 256;
+const MAX_PASSWORD: usize = 4096;
+/// How long an authenticated connection waits for the browser's WebSocket.
+const ATTACH_TIMEOUT_MS: libc::c_int = 65_000;
 
 #[derive(Clone)]
 struct Account {
@@ -25,20 +33,30 @@ fn main() {
 }
 
 fn run() -> Result<(), String> {
+    // The password passes through this process: no core dump, no ptrace.
+    // PR_SET_NO_NEW_PRIVS stays off, the user's shell may need sudo.
+    if unsafe { libc::prctl(libc::PR_SET_DUMPABLE, 0, 0, 0, 0) } != 0 {
+        return Err("não foi possível proteger a memória do processo".into());
+    }
     parse_mode()?;
     let caller = account("vega-web")?;
     if unsafe { libc::geteuid() } != 0 || peer_uid(0)? != caller.uid {
         return Err("só aceita conexões do usuário de serviço vega-web".into());
     }
 
-    let username = read_username(0).map_err(|error| format!("identidade inválida: {error}"))?;
-    let target = account(&username)?;
-    if target.uid == 0 {
-        return Err("login root não é permitido no terminal web".into());
-    }
-    if !is_wheel_member(&target)? {
-        return Err("usuário não pertence ao grupo wheel".into());
-    }
+    // The network process is not trusted with the identity: this root
+    // helper checks the password itself (vega-web#34).
+    let target = match authenticate(0) {
+        Ok(target) => {
+            write_all(1, &[0]).map_err(|error| format!("resposta: {error}"))?;
+            target
+        }
+        Err(error) => {
+            let _ = write_all(1, &[1]);
+            return Err(error);
+        }
+    };
+    wait_for_attach(0)?;
 
     let mut master: libc::c_int = -1;
     let size = libc::winsize {
@@ -199,37 +217,78 @@ fn peer_uid(fd: RawFd) -> Result<libc::uid_t, String> {
     Ok(credentials.uid)
 }
 
-fn read_username(fd: RawFd) -> io::Result<String> {
+/// Reads the credentials frame: `A`, user length (u16), user, password
+/// length (u16), password. The password is zeroed when dropped.
+fn read_credentials(fd: RawFd) -> io::Result<(String, zeroize::Zeroizing<String>)> {
+    let invalid = |message: &str| io::Error::new(io::ErrorKind::InvalidData, message.to_string());
     let mut kind = [0_u8; 1];
-    if !read_exact(fd, &mut kind)? || kind[0] != b'U' {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "quadro de usuário ausente",
-        ));
+    if !read_exact(fd, &mut kind)? || kind[0] != b'A' {
+        return Err(invalid("quadro de credenciais ausente"));
     }
-    let mut length = [0_u8; 2];
-    if !read_exact(fd, &mut length)? {
-        return Err(io::Error::new(
-            io::ErrorKind::UnexpectedEof,
-            "usuário incompleto",
-        ));
+    let field = |limit: usize| -> io::Result<zeroize::Zeroizing<Vec<u8>>> {
+        let mut length = [0_u8; 2];
+        if !read_exact(fd, &mut length)? {
+            return Err(invalid("credenciais incompletas"));
+        }
+        let length = u16::from_be_bytes(length) as usize;
+        if length == 0 || length > limit {
+            return Err(invalid("tamanho de credencial inválido"));
+        }
+        let mut value = zeroize::Zeroizing::new(vec![0; length]);
+        if !read_exact(fd, &mut value)? {
+            return Err(invalid("credenciais incompletas"));
+        }
+        Ok(value)
+    };
+    let user = field(MAX_USERNAME)?;
+    let password = field(MAX_PASSWORD)?;
+    let user = String::from_utf8(user.to_vec()).map_err(|_| invalid("usuário não é UTF-8"))?;
+    let password = zeroize::Zeroizing::new(
+        String::from_utf8(password.to_vec()).map_err(|_| invalid("senha não é UTF-8"))?,
+    );
+    if user.chars().any(char::is_control) || password.contains('\0') {
+        return Err(invalid("credenciais inválidas"));
     }
-    let length = u16::from_be_bytes(length) as usize;
-    if length == 0 || length > 256 {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "tamanho de usuário inválido",
-        ));
+    Ok((user, password))
+}
+
+/// Authenticates the user with PAM (service vega-web) and checks the account:
+/// not root, member of wheel, PAM account still valid.
+fn authenticate(fd: RawFd) -> Result<Account, String> {
+    let (username, password) =
+        read_credentials(fd).map_err(|error| format!("identidade inválida: {error}"))?;
+    let mut pam = pam_ffi::AuthenticatedAccount::authenticate("vega-web", &username, &password)
+        .map_err(|error| format!("autenticação recusada: {}", error.0))?;
+    drop(password);
+    pam.check_account()
+        .map_err(|error| format!("conta recusada: {}", error.0))?;
+    let target = account(&username)?;
+    if target.uid == 0 {
+        return Err("login root não é permitido no terminal web".into());
     }
-    let mut value = vec![0; length];
-    if !read_exact(fd, &mut value)? {
-        return Err(io::Error::new(
-            io::ErrorKind::UnexpectedEof,
-            "usuário incompleto",
-        ));
+    if !is_wheel_member(&target)? {
+        return Err("usuário não pertence ao grupo wheel".into());
     }
-    String::from_utf8(value)
-        .map_err(|_| io::Error::new(io::ErrorKind::InvalidData, "usuário não é UTF-8"))
+    Ok(target)
+}
+
+/// Waits for the `G` byte that vega-web sends when the browser's WebSocket
+/// attaches; an authenticated connection never opens a shell on its own.
+fn wait_for_attach(fd: RawFd) -> Result<(), String> {
+    let mut peer = libc::pollfd {
+        fd,
+        events: libc::POLLIN,
+        revents: 0,
+    };
+    let ready = unsafe { libc::poll(&mut peer, 1, ATTACH_TIMEOUT_MS) };
+    if ready <= 0 {
+        return Err("o terminal não foi aberto a tempo".into());
+    }
+    let mut go = [0_u8; 1];
+    match read_exact(fd, &mut go) {
+        Ok(true) if go[0] == b'G' => Ok(()),
+        _ => Err("abertura do terminal inválida".into()),
+    }
 }
 
 fn account(name: &str) -> Result<Account, String> {

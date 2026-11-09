@@ -592,6 +592,7 @@ pub fn page_with(
     body: &str,
 ) -> String {
     let username = crate::pages::html_escape(&user.name);
+    let logout_csrf = crate::pages::html_escape(&user.csrf);
     let address = crate::pages::html_escape(&user.address);
     let initial = crate::pages::html_escape(
         &user
@@ -662,7 +663,7 @@ pub fn page_with(
 <p class="sidebar-user"><span class="sidebar-avatar" aria-hidden="true">{initial}</span><span class="sidebar-user-text"><strong>{username}</strong><small>{address}</small></span></p>
 <div class="sidebar-tools">
 {theme_switch}
-<form method="post" action="/logout"><button type="submit" class="logout">{ICON_LOGOUT}Sair</button></form>
+<form method="post" action="/logout"><input type="hidden" name="csrf" value="{logout_csrf}"><button type="submit" class="logout">{ICON_LOGOUT}Sair</button></form>
 </div>
 </div>
 </aside>

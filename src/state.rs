@@ -12,24 +12,34 @@ use crate::auth::Authenticator;
 
 pub const SESSION_COOKIE: &str = "vega_web_session";
 
+/// A connection to the terminal helper that already authenticated the user
+/// with PAM (vega-web#34). The password never stays in this process: the
+/// grant is the open, authenticated connection, consumed once.
+type TerminalGrant = (Instant, Option<tokio::net::UnixStream>);
+
 #[derive(Clone, Default)]
-pub struct TerminalGrants(Arc<Mutex<HashMap<String, Instant>>>);
+pub struct TerminalGrants(Arc<Mutex<HashMap<String, TerminalGrant>>>);
 
 impl TerminalGrants {
-    pub fn grant(&self, session: String, until: Instant) {
-        self.0.lock().unwrap().insert(session, until);
+    pub fn grant(&self, session: String, until: Instant, helper: Option<tokio::net::UnixStream>) {
+        self.0.lock().unwrap().insert(session, (until, helper));
     }
 
     pub fn valid(&self, session: &str, now: Instant) -> bool {
         let mut grants = self.0.lock().unwrap();
-        grants.retain(|_, until| *until > now);
-        grants.get(session).is_some_and(|until| *until > now)
+        grants.retain(|_, (until, _)| *until > now);
+        grants.get(session).is_some_and(|(until, _)| *until > now)
     }
 
-    pub fn consume(&self, session: &str, now: Instant) -> bool {
+    /// Takes the authenticated helper connection; expired grants drop theirs,
+    /// which makes the helper give up without opening a shell.
+    pub fn consume(&self, session: &str, now: Instant) -> Option<Option<tokio::net::UnixStream>> {
         let mut grants = self.0.lock().unwrap();
-        grants.retain(|_, until| *until > now);
-        grants.remove(session).is_some_and(|until| until > now)
+        grants.retain(|_, (until, _)| *until > now);
+        grants
+            .remove(session)
+            .filter(|(until, _)| *until > now)
+            .map(|(_, helper)| helper)
     }
 }
 
@@ -188,6 +198,17 @@ impl SessionStore {
         session.last_seen = now;
         session.publish_expiry(policy);
         Some(session.username.clone())
+    }
+
+    /// The account and CSRF token of a live session, refreshing its activity.
+    pub fn identity_for(&self, token: &str, now: Instant) -> Option<(String, String)> {
+        let mut store = self.0.lock().unwrap();
+        remove_expired(&mut store, now);
+        let policy = store.policy;
+        let session = store.values.get_mut(token)?;
+        session.last_seen = now;
+        session.publish_expiry(policy);
+        Some((session.username.clone(), session.csrf.clone()))
     }
 
     pub fn lease(&self, token: &str, now: Instant) -> Option<SessionLease> {
@@ -517,16 +538,16 @@ mod tests {
     fn terminal_grant_is_session_bound_expiring_and_single_use() {
         let grants = TerminalGrants::default();
         let now = Instant::now();
-        grants.grant("session-a".into(), now + Duration::from_secs(60));
+        grants.grant("session-a".into(), now + Duration::from_secs(60), None);
 
         assert!(grants.valid("session-a", now));
         assert!(!grants.valid("session-b", now));
-        assert!(grants.consume("session-a", now));
-        assert!(!grants.consume("session-a", now));
+        assert!(grants.consume("session-a", now).is_some());
+        assert!(grants.consume("session-a", now).is_none());
 
-        grants.grant("expired".into(), now);
+        grants.grant("expired".into(), now, None);
         assert!(!grants.valid("expired", now));
-        assert!(!grants.consume("expired", now));
+        assert!(grants.consume("expired", now).is_none());
     }
 
     #[test]
