@@ -281,7 +281,9 @@ def rate_limit():
     assert 'Muitas tentativas' in login()[2]
     assert 'Muitas tentativas' in login(source='127.0.0.2')[2]
     assert 'Muitas tentativas' in login(user='bob')[2]
-    assert request('POST', '/terminal', {'password': PASSWORD}, cookie)[0] == 429
+    page = request('GET', '/terminal', cookie=cookie)[2]
+    csrf = re.search(r'name="csrf" value="([0-9a-f]{64})"', page).group(1)
+    assert request('POST', '/terminal', {'password': PASSWORD, 'csrf': csrf}, cookie)[0] == 429
     assert accepted() == before, 'blocked requests reached PAM'
     successful_login('bob', source='127.0.0.2')
     time.sleep(5.2)
