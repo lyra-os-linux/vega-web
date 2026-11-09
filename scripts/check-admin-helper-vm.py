@@ -18,10 +18,16 @@ def main():
     parser.add_argument('--modules-dir', required=True, type=Path)
     parser.add_argument('--vegad', required=True, type=Path)
     parser.add_argument('--policy', required=True, type=Path)
+    # The vegad checkout the daemon was built from: its remote-admin Polkit
+    # rule and the health-check units are part of what the broker relies on.
+    parser.add_argument('--vegad-source', required=True, type=Path)
     parser.add_argument('--bin-dir', type=Path, default=REPO / 'target/debug')
     parser.add_argument('--log', type=Path, default=REPO / 'target/admin-helper-vm.log')
     args = parser.parse_args()
-    for path in [args.kernel, args.vegad, args.policy]:
+    remote_rule = args.vegad_source / 'packaging/polkit-1/rules.d/50-vegad-remote-admin.rules'
+    health_units = [args.vegad_source / 'packaging' / name
+                    for name in ['vegad-health-check.service', 'vegad-health-check.timer']]
+    for path in [args.kernel, args.vegad, args.policy, remote_rule, *health_units]:
         if not path.is_file():
             parser.error('missing input: ' + str(path))
     vm = SystemdVM('admin', 'lyra-admin-test-vm')
@@ -62,6 +68,11 @@ def main():
     for policy in Path('/usr/share/polkit-1/actions').glob('*[Ff]irewall*'):
         vm.put(str(policy), policy.read_text())
     vm.put('/etc/polkit-1/rules.d/50-vega-web-admin.rules', (REPO / 'packaging/50-vega-web-admin.rules').read_text())
+    # As on the Server: vegad's rule turns a non-local wheel member's
+    # mutations into AUTH_SELF and its brokered reads into silent grants.
+    vm.put('/etc/polkit-1/rules.d/50-vegad-remote-admin.rules', remote_rule.read_text())
+    for unit in health_units:
+        vm.put('/usr/lib/systemd/system/' + unit.name, unit.read_text())
     vm.put('/etc/polkit-1/rules.d/00-vega-test-audit.rules', '''polkit.addRule(function(action, subject) {
   if (action.id.indexOf("org.lyraos.vega.") === 0)
     polkit.log("VEGA_TEST_SUBJECT user=" + subject.user + " unit=" + subject.system_unit +
