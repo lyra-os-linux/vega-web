@@ -7,7 +7,6 @@ use axum::response::{IntoResponse, Redirect, Response};
 use axum::{Extension, Form};
 use axum_extra::extract::cookie::PrivateCookieJar;
 use serde::Deserialize;
-use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UnixStream;
@@ -32,10 +31,12 @@ pub async fn handler(
     if !state.terminal_grants.valid(&token, Instant::now()) {
         let body = r#"<p>Por segurança, confirme sua senha antes de abrir um shell completo.</p>
 <form method="post" action="/terminal">
+<input type="hidden" name="csrf" value="{csrf}">
 <label>Senha<br><input type="password" name="password" autocomplete="current-password" required autofocus></label>
 <button type="submit">Abrir terminal</button>
-</form>"#;
-        return render("Terminal", "/terminal", &user, body.to_string()).into_response();
+</form>"#
+            .replace("{csrf}", &super::html_escape(&user.csrf));
+        return render("Terminal", "/terminal", &user, body).into_response();
     }
     let body = r#"
 <p>Shell completo do servidor. O acesso é permitido somente a administradores do grupo <code>wheel</code>.</p>
@@ -87,6 +88,9 @@ pub async fn handler(
 #[derive(Deserialize)]
 pub struct ReauthRequest {
     password: String,
+    /// The session's CSRF token (vega-web#35).
+    #[serde(default)]
+    csrf: String,
 }
 
 pub async fn reauthenticate(
@@ -101,6 +105,9 @@ pub async fn reauthenticate(
         Some(cookie) => cookie.value().to_string(),
         None => return Redirect::to("/login").into_response(),
     };
+    if !super::admin::matching_csrf(&user.csrf, &form.csrf) {
+        return (StatusCode::FORBIDDEN, "pedido sem o token da sessão").into_response();
+    }
     let ip = remote.ip().to_string();
     if state
         .login_limiter
@@ -115,26 +122,26 @@ pub async fn reauthenticate(
             return (StatusCode::SERVICE_UNAVAILABLE, "autenticação ocupada").into_response();
         }
     };
-    let auth = Arc::clone(&state.authenticator);
     let password = zeroize::Zeroizing::new(form.password);
-    let check_user = username.clone();
-    let result = tokio::task::spawn_blocking(move || {
-        let _permit = permit;
-        auth.authenticate(&check_user, &password)
-    })
-    .await;
-    if matches!(result, Ok(Ok(()))) {
+    // The root helper checks the password with PAM itself (vega-web#34);
+    // this process keeps the authenticated connection, never the password.
+    let result = open_authenticated(&state.terminal_socket, &username, &password).await;
+    drop(permit);
+    if let Ok(helper) = result {
         state.login_limiter.success(&ip, &username);
-        state
-            .terminal_grants
-            .grant(token, Instant::now() + Duration::from_secs(60));
+        state.terminal_grants.grant(
+            token,
+            Instant::now() + Duration::from_secs(60),
+            Some(helper),
+        );
         Redirect::to("/terminal").into_response()
     } else {
         let delay = state.login_limiter.failure(&ip, &username, Instant::now());
         tokio::time::sleep(delay).await;
         let body = r#"<p class="error">Senha inválida.</p><p>O terminal não foi aberto.</p>
-<form method="post" action="/terminal"><label>Senha<br><input type="password" name="password" autocomplete="current-password" required autofocus></label><button type="submit">Tentar novamente</button></form>"#;
-        render("Terminal", "/terminal", &user, body.to_string()).into_response()
+<form method="post" action="/terminal"><input type="hidden" name="csrf" value="{csrf}"><label>Senha<br><input type="password" name="password" autocomplete="current-password" required autofocus></label><button type="submit">Tentar novamente</button></form>"#
+            .replace("{csrf}", &super::html_escape(&user.csrf));
+        render("Terminal", "/terminal", &user, body).into_response()
     }
 }
 
@@ -151,9 +158,9 @@ pub async fn websocket(
         .get(SESSION_COOKIE)
         .map(|cookie| cookie.value().to_string())
         .unwrap_or_default();
-    if !state.terminal_grants.consume(&token, Instant::now()) {
+    let Some(Some(helper)) = state.terminal_grants.consume(&token, Instant::now()) else {
         return (StatusCode::FORBIDDEN, "reautenticação necessária").into_response();
-    }
+    };
     let Some(lease) = state.sessions.lease(&token, Instant::now()) else {
         return (StatusCode::UNAUTHORIZED, "sessão encerrada").into_response();
     };
@@ -167,25 +174,23 @@ pub async fn websocket(
                 .into_response();
         }
     };
-    let socket_path = state.terminal_socket;
     ws.max_message_size(64 * 1024)
-        .on_upgrade(move |socket| run_terminal(socket, lease, permit, socket_path))
+        .on_upgrade(move |socket| run_terminal(socket, lease, permit, helper))
 }
 
 async fn run_terminal(
     mut socket: WebSocket,
     mut lease: SessionLease,
     _permit: tokio::sync::OwnedSemaphorePermit,
-    socket_path: String,
+    helper: UnixStream,
 ) {
-    let username = lease.username.clone();
     // Cancel the entire bridge, including connect and blocked writes. Merely
     // selecting on revocation inside the read loop would leave those awaits
     // alive after logout. Dropping the bridge closes both helper socket halves.
     let revoked = tokio::select! {
         biased;
         _ = lease.revoked() => true,
-        _ = bridge_terminal(&mut socket, &username, &socket_path) => false,
+        _ = bridge_terminal(&mut socket, helper) => false,
     };
     let frame = CloseFrame {
         code: if revoked {
@@ -202,20 +207,11 @@ async fn run_terminal(
     .await;
 }
 
-async fn bridge_terminal(socket: &mut WebSocket, username: &str, socket_path: &str) {
-    let stream = match UnixStream::connect(socket_path).await {
-        Ok(stream) => stream,
-        Err(error) => {
-            let _ = socket
-                .send(Message::Text(
-                    format!("Não foi possível abrir o terminal: {error}\r\n").into(),
-                ))
-                .await;
-            return;
-        }
-    };
+async fn bridge_terminal(socket: &mut WebSocket, stream: UnixStream) {
     let (mut output, mut input) = stream.into_split();
-    if write_user(&mut input, username).await.is_err() {
+    // The helper authenticated the user at reauthentication and waits for
+    // this byte before opening the shell.
+    if input.write_all(b"G").await.is_err() {
         return;
     }
     let mut buffer = [0_u8; 8192];
@@ -260,14 +256,37 @@ fn same_origin(headers: &HeaderMap) -> bool {
     origin == format!("https://{host}")
 }
 
-async fn write_user(
-    input: &mut tokio::net::unix::OwnedWriteHalf,
+/// Opens a helper connection and sends the credentials frame (`A`, u16
+/// length + user, u16 length + password). The helper answers 0 when PAM
+/// accepted the password and the user may open a terminal.
+async fn open_authenticated(
+    socket_path: &str,
     username: &str,
-) -> std::io::Result<()> {
-    let data = username.as_bytes();
-    input.write_all(b"U").await?;
-    input.write_all(&(data.len() as u16).to_be_bytes()).await?;
-    input.write_all(data).await
+    password: &str,
+) -> std::io::Result<UnixStream> {
+    let invalid = || {
+        std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            "credenciais recusadas",
+        )
+    };
+    let (user, secret) = (username.as_bytes(), password.as_bytes());
+    if user.is_empty() || user.len() > 256 || secret.is_empty() || secret.len() > 4096 {
+        return Err(invalid());
+    }
+    let mut frame = zeroize::Zeroizing::new(Vec::with_capacity(5 + user.len() + secret.len()));
+    frame.push(b'A');
+    frame.extend_from_slice(&(user.len() as u16).to_be_bytes());
+    frame.extend_from_slice(user);
+    frame.extend_from_slice(&(secret.len() as u16).to_be_bytes());
+    frame.extend_from_slice(secret);
+    let mut stream = UnixStream::connect(socket_path).await?;
+    stream.write_all(&frame).await?;
+    let mut answer = [1_u8; 1];
+    match tokio::time::timeout(Duration::from_secs(35), stream.read_exact(&mut answer)).await {
+        Ok(Ok(_)) if answer[0] == 0 => Ok(stream),
+        _ => Err(invalid()),
+    }
 }
 
 async fn write_input(
