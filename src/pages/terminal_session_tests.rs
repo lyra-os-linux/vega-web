@@ -4,6 +4,7 @@ use axum::middleware;
 use axum::routing::{get, post};
 use axum_extra::extract::cookie::{Cookie, Key};
 use futures_util::{SinkExt, StreamExt};
+use std::sync::Arc;
 use tokio::net::{TcpListener, TcpStream, UnixListener};
 use tokio::sync::Semaphore;
 use tokio_tungstenite::tungstenite::{self, client::IntoClientRequest};
@@ -111,16 +112,19 @@ async fn exercise_session(scenario: &str) {
         axum::serve(tcp, router).await.unwrap();
     });
     sessions.insert("token".into(), Session::new("alice".into(), Instant::now()));
-    grants.grant("token".into(), Instant::now() + Duration::from_secs(60));
+    // Reauthentication leaves an authenticated helper connection as the grant
+    // (vega-web#34); the WebSocket attaches with "G".
+    let authenticated = UnixStream::connect(&path).await.unwrap();
+    grants.grant(
+        "token".into(),
+        Instant::now() + Duration::from_secs(60),
+        Some(authenticated),
+    );
     let cookie = cookie_header(&key, "token");
     let (start_drain, drain) = tokio::sync::oneshot::channel();
     let helper = tokio::spawn(async move {
         let (mut stream, _) = listener.accept().await.unwrap();
-        assert_eq!(stream.read_u8().await.unwrap(), b'U');
-        let length = stream.read_u16().await.unwrap();
-        let mut user = vec![0; length as usize];
-        stream.read_exact(&mut user).await.unwrap();
-        assert_eq!(user, b"alice");
+        assert_eq!(stream.read_u8().await.unwrap(), b'G');
         stream.write_all(b"ready\n").await.unwrap();
         // Wait to drain until after revocation to exercise blocked IPC writes.
         let _ = drain.await;
