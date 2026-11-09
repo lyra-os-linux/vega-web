@@ -52,10 +52,12 @@ async fn connect(
         .map(|(socket, _)| socket)
 }
 
-async fn logout_from_another_tab(address: SocketAddr, cookie: &str) {
+async fn logout_from_another_tab(address: SocketAddr, cookie: &str, csrf: &str) {
+    let body = format!("csrf={csrf}");
     let mut stream = TcpStream::connect(address).await.unwrap();
     stream.write_all(format!(
-        "POST /logout HTTP/1.1\r\nHost: {address}\r\nCookie: {cookie}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+        "POST /logout HTTP/1.1\r\nHost: {address}\r\nCookie: {cookie}\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
     ).as_bytes()).await.unwrap();
     let mut response = Vec::new();
     stream.read_to_end(&mut response).await.unwrap();
@@ -178,7 +180,12 @@ async fn exercise_session(scenario: &str) {
         if scenario == "blocked-input" {
             tokio::time::sleep(Duration::from_millis(200)).await;
         }
-        logout_from_another_tab(address, &cookie).await;
+        let csrf = sessions
+            .lease("token", Instant::now())
+            .unwrap()
+            .csrf
+            .clone();
+        logout_from_another_tab(address, &cookie, &csrf).await;
     }
     // The terminal closes while its client socket is still open. Expiry does
     // not depend on a subsequent HTTP request cleaning the session store.

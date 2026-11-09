@@ -31,10 +31,12 @@ pub async fn handler(
     if !state.terminal_grants.valid(&token, Instant::now()) {
         let body = r#"<p>Por segurança, confirme sua senha antes de abrir um shell completo.</p>
 <form method="post" action="/terminal">
+<input type="hidden" name="csrf" value="{csrf}">
 <label>Senha<br><input type="password" name="password" autocomplete="current-password" required autofocus></label>
 <button type="submit">Abrir terminal</button>
-</form>"#;
-        return render("Terminal", "/terminal", &user, body.to_string()).into_response();
+</form>"#
+            .replace("{csrf}", &super::html_escape(&user.csrf));
+        return render("Terminal", "/terminal", &user, body).into_response();
     }
     let body = r#"
 <p>Shell completo do servidor. O acesso é permitido somente a administradores do grupo <code>wheel</code>.</p>
@@ -86,6 +88,9 @@ pub async fn handler(
 #[derive(Deserialize)]
 pub struct ReauthRequest {
     password: String,
+    /// The session's CSRF token (vega-web#35).
+    #[serde(default)]
+    csrf: String,
 }
 
 pub async fn reauthenticate(
@@ -100,6 +105,9 @@ pub async fn reauthenticate(
         Some(cookie) => cookie.value().to_string(),
         None => return Redirect::to("/login").into_response(),
     };
+    if !super::admin::matching_csrf(&user.csrf, &form.csrf) {
+        return (StatusCode::FORBIDDEN, "pedido sem o token da sessão").into_response();
+    }
     let ip = remote.ip().to_string();
     if state
         .login_limiter
@@ -131,8 +139,9 @@ pub async fn reauthenticate(
         let delay = state.login_limiter.failure(&ip, &username, Instant::now());
         tokio::time::sleep(delay).await;
         let body = r#"<p class="error">Senha inválida.</p><p>O terminal não foi aberto.</p>
-<form method="post" action="/terminal"><label>Senha<br><input type="password" name="password" autocomplete="current-password" required autofocus></label><button type="submit">Tentar novamente</button></form>"#;
-        render("Terminal", "/terminal", &user, body.to_string()).into_response()
+<form method="post" action="/terminal"><input type="hidden" name="csrf" value="{csrf}"><label>Senha<br><input type="password" name="password" autocomplete="current-password" required autofocus></label><button type="submit">Tentar novamente</button></form>"#
+            .replace("{csrf}", &super::html_escape(&user.csrf));
+        render("Terminal", "/terminal", &user, body).into_response()
     }
 }
 

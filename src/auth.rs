@@ -1,5 +1,6 @@
 use axum::Form;
 use axum::extract::{ConnectInfo, RawQuery, Request, State};
+use axum::http::StatusCode;
 use axum::middleware::Next;
 use axum::response::{Html, IntoResponse, Redirect, Response};
 use axum_extra::extract::cookie::{Cookie, PrivateCookieJar, SameSite};
@@ -43,6 +44,8 @@ impl Authenticator for PamAuthenticator {
 pub struct CurrentUser {
     pub name: String,
     pub address: String,
+    /// The session's CSRF token, for the forms every page renders (logout).
+    pub csrf: String,
 }
 
 pub async fn require_session(
@@ -51,12 +54,12 @@ pub async fn require_session(
     mut req: Request,
     next: Next,
 ) -> Response {
-    let username = jar
+    let identity = jar
         .get(SESSION_COOKIE)
-        .and_then(|cookie| state.sessions.username_for(cookie.value(), Instant::now()));
+        .and_then(|cookie| state.sessions.identity_for(cookie.value(), Instant::now()));
 
-    match username {
-        Some(username) => {
+    match identity {
+        Some((username, csrf)) => {
             let address = req
                 .extensions()
                 .get::<ConnectInfo<SocketAddr>>()
@@ -65,6 +68,7 @@ pub async fn require_session(
             req.extensions_mut().insert(CurrentUser {
                 name: username,
                 address,
+                csrf,
             });
             next.run(req).await
         }
@@ -236,9 +240,33 @@ pub async fn login_submit(
     }
 }
 
-pub async fn logout(State(state): State<AppState>, jar: PrivateCookieJar) -> Response {
+#[derive(Deserialize, Default)]
+pub struct LogoutForm {
+    #[serde(default)]
+    csrf: String,
+}
+
+/// Ends the session. The form must carry the session's CSRF token
+/// (vega-web#35); without a live session there is nothing to end, and the
+/// browser just goes back to the login page.
+pub async fn logout(
+    State(state): State<AppState>,
+    jar: PrivateCookieJar,
+    form: Result<Form<LogoutForm>, axum::extract::rejection::FormRejection>,
+) -> Response {
+    let received = form.map(|Form(form)| form.csrf).unwrap_or_default();
     if let Some(cookie) = jar.get(SESSION_COOKIE) {
-        state.sessions.remove(cookie.value());
+        let token = cookie.value().to_string();
+        if let Some(lease) = state.sessions.lease(&token, Instant::now()) {
+            if !crate::pages::admin::matching_csrf(&lease.csrf, &received) {
+                return (
+                    StatusCode::FORBIDDEN,
+                    "pedido de saída sem o token da sessão",
+                )
+                    .into_response();
+            }
+            state.sessions.remove(&token);
+        }
     }
     (
         jar.remove(Cookie::from(SESSION_COOKIE)),

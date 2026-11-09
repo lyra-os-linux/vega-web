@@ -200,6 +200,17 @@ impl SessionStore {
         Some(session.username.clone())
     }
 
+    /// The account and CSRF token of a live session, refreshing its activity.
+    pub fn identity_for(&self, token: &str, now: Instant) -> Option<(String, String)> {
+        let mut store = self.0.lock().unwrap();
+        remove_expired(&mut store, now);
+        let policy = store.policy;
+        let session = store.values.get_mut(token)?;
+        session.last_seen = now;
+        session.publish_expiry(policy);
+        Some((session.username.clone(), session.csrf.clone()))
+    }
+
     pub fn lease(&self, token: &str, now: Instant) -> Option<SessionLease> {
         let mut store = self.0.lock().unwrap();
         remove_expired(&mut store, now);
