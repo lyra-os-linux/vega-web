@@ -52,7 +52,8 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           repository: lyra-os-linux/vegad
-          ref: 6daccd0b181777764e549373b2bdd06cd2189372
+          # vegad v5.9.0: Diagnostics and Cleanup, which the broker drives.
+          ref: f7152c925dfc6325758dcb93fe187277f1719261
           path: target/vegad-contract-source
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5
         with:
@@ -68,7 +69,8 @@ jobs:
             --kernel "$RUNNER_TEMP/vega-terminal-kernel" \
             --modules-dir "/lib/modules/$vm_version" \
             --vegad target/vegad-contract-check \
-            --policy target/vegad-contract-source/packaging/org.lyraos.vega.policy
+            --policy target/vegad-contract-source/packaging/org.lyraos.vega.policy \
+            --vegad-source target/vegad-contract-source
       - name: Verify canonical D-Bus contract pin
         run: |
           bash scripts/check-dbus-pin.sh

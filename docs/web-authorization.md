@@ -118,7 +118,7 @@ cargo test --locked
 bash scripts/check-authorization-contracts.sh
 bash scripts/check-session-contracts.sh
 cargo build --locked --bins
-python3 scripts/check-admin-helper-vm.py --kernel /caminho/vmlinuz --modules-dir /caminho/modules/versao --vegad /caminho/vegad --policy /caminho/org.lyraos.vega.policy
+python3 scripts/check-admin-helper-vm.py --kernel /caminho/vmlinuz --modules-dir /caminho/modules/versao --vegad /caminho/vegad --policy /caminho/org.lyraos.vega.policy --vegad-source /caminho/checkout-do-vegad
 ```
 
 A integração HTTP usa um barramento privado e testa identidade forjada,

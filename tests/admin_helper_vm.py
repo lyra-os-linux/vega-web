@@ -2,6 +2,7 @@
 import array
 import concurrent.futures
 from http import client as http_client
+import json
 import os
 from pathlib import Path
 import re
@@ -108,6 +109,89 @@ def commit(stream, grant, extra=b''):
         read_exact(stream, length)
     assert stream.recv(1) == b''
     return value
+
+
+def commit_read(stream, grant):
+    """Commit and return (value, payload); None when the broker refuses."""
+    stream.sendall(b'VWC1' + grant)
+    stream.shutdown(socket.SHUT_WR)
+    if read_exact(stream, 1) != b'\x00':
+        return None
+    value = struct.unpack('>I', read_exact(stream, 4))[0]
+    length = struct.unpack('>I', read_exact(stream, 4))[0]
+    assert length <= 1 << 20
+    payload = read_exact(stream, length) if length else b''
+    assert stream.recv(1) == b''
+    return value, payload
+
+
+def run(operation):
+    """One brokered operation as alice: fresh password, prepare, commit."""
+    stream, grant, _ = prepare(operation=operation)
+    with stream:
+        return commit_read(stream, grant)
+
+
+def job(code, value, flag=None):
+    return bytes([code]) + (bytes([flag]) if flag is not None else b'') + struct.pack('>I', value)
+
+
+def finished(interface, job_id):
+    events = Path('/var/log/vega-jobs.log').read_text()
+    return re.search(r'interface=org\.lyraos\.Vega1\.' + interface +
+                     r'; member=Finished\s+uint32 ' + str(job_id) + r'\b', events) is not None
+
+
+def diagnostics_and_cleanup():
+    """The operations added in 5.2.0, through vegad's remote-admin rule."""
+    before = Path('/var/log/polkit-test.log').read_text()
+
+    value, payload = run(b'\x1a')  # Read CleanupScan
+    scan = json.loads(payload)
+    assert value == 0 and {c['id'] for c in scan['categories']} >= {'coredumps', 'journal'}, scan
+    value, payload = run(b'\x19')  # Read LastPeriodic, never run here
+    assert value == 0 and json.loads(payload)['job'] == 0, payload
+    log('brokered reads: Cleanup.Scan and Diagnostics.LastPeriodic return their JSON')
+
+    test = run(b'\x1e' + b'logs')  # DiagnosticsStart
+    assert test is not None and test[0] > 0, test
+    until(lambda: finished('Diagnostics', test[0]), 60)
+    value, payload = run(job(32, test[0], flag=1))  # DiagnosticsReport, redacted
+    assert value == test[0] and payload, payload
+    value, payload = run(job(32, test[0], flag=0))  # DiagnosticsReport, full
+    assert value == test[0] and payload, payload
+    assert run(job(34, test[0])) == (test[0], b'')  # MarkLogsSeen
+    log('Diagnostics.Start, Report (redacted and full) and MarkLogsSeen on a real job')
+
+    # A finding that the job never produced: vegad must refuse it, after
+    # authorizing the caller, and nothing is repaired.
+    assert run(job(33, test[0]) + b'logs:999') is None
+    log('RepairFindings reaches vegad and an unknown finding is refused')
+
+    assert run(b'\x23\x01\x01') == (0, b'')  # SetPeriodic: on, daily
+    dropin = Path('/etc/systemd/system/vegad-health-check.timer.d/10-vega-frequency.conf')
+    assert 'OnCalendar=daily' in dropin.read_text()
+    assert ctl('is-enabled', 'vegad-health-check.timer') == 'enabled'
+    assert run(b'\x23\x00\x00') == (0, b'')  # SetPeriodic: off, weekly
+    assert not dropin.exists()
+    assert command('systemctl', 'is-enabled', 'vegad-health-check.timer', check=False).stdout.strip() == 'disabled'
+    log('SetPeriodic turns the health-check timer on (daily) and off (weekly)')
+
+    clean = run(b'\x24' + b'coredumps')  # CleanupClean
+    assert clean is not None and clean[0] > 0, clean
+    until(lambda: finished('Cleanup', clean[0]), 60)
+    log('Cleanup.Clean runs a real cleanup job')
+
+    network = run(b'\x1f')  # NetworkCheck: test, wait and report in one step
+    assert network is not None and network[0] > 0 and network[1], network
+    log('NetworkCheck runs the network test and returns its report')
+
+    polkit = Path('/var/log/polkit-test.log').read_text()[len(before):]
+    for action in ['storage.read-admin', 'hardware.read-admin', 'hardware.diagnose',
+                   'logs.read-admin', 'hardware.repair', 'storage.cleanup', 'network.diagnose']:
+        assert 'user=alice ' in polkit and 'action=org.lyraos.vega.' + action in polkit, (action, polkit[-4000:])
+    assert 'user=vega-web ' not in polkit, polkit[-4000:]
+    log('every new operation is authorized for the real administrator, never for vega-web')
 
 
 def rejected(payload, uid=998):
@@ -292,6 +376,10 @@ def main():
     transactions = open('/var/log/transactions.log', 'w')
     subprocess.Popen(['dbus-monitor', '--system', "type='signal',interface='org.lyraos.Vega1.Software'"],
                      stdout=transactions, stderr=subprocess.STDOUT)
+    jobs = open('/var/log/vega-jobs.log', 'w')
+    subprocess.Popen(['dbus-monitor', '--system', "type='signal',interface='org.lyraos.Vega1.Diagnostics'",
+                      "type='signal',interface='org.lyraos.Vega1.Cleanup'"],
+                     stdout=jobs, stderr=subprocess.STDOUT)
     # Collect the candidate's audit output independently of journald plumbing.
     dropin = Path('/etc/systemd/system/vega-web-admin@.service.d/audit.conf')
     dropin.parent.mkdir(parents=True)
@@ -453,6 +541,7 @@ assert all(outcome.values()), outcome
     assert audit_log.count('phase=polkit-authenticated') == 2
     assert grant.hex() not in audit_log and grant2.hex() not in audit_log
     log('real Polkit challenges preserve actual UID, action and transaction without credentials/grants')
+    diagnostics_and_cleanup()
     https_tests()
     # Code 3 belonged to the retired NVIDIA installation and stays reserved:
     # even a valid administrator is refused while the request is read, before
@@ -475,7 +564,7 @@ if __name__ == '__main__':
         for args in [('firewall-cmd', '--state'), ('nft', 'list', 'ruleset')]:
             result = command(*args, check=False)
             print(args, result.returncode, result.stdout[-1000:], result.stderr[-2000:], flush=True)
-        for name in ['polkit-test.log', 'firewalld-test.log', 'firewalld', 'vegad-test.log', 'transactions.log', 'zypper.log', 'vega-admin-broker.log']:
+        for name in ['polkit-test.log', 'firewalld-test.log', 'firewalld', 'vegad-test.log', 'transactions.log', 'vega-jobs.log', 'zypper.log', 'vega-admin-broker.log']:
             path = Path('/var/log') / name
             if path.exists():
                 print(name + '\n' + path.read_text(errors='replace')[-6000:], flush=True)
