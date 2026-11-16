@@ -14,7 +14,7 @@ codegen-units = 1
 strip = "debuginfo"
 
 [dependencies]
-lyra-vega-dbus = { git = "https://github.com/lyra-os-linux/lyra-vega-dbus", rev = "805485a68a39397f2dd03c6e28fa0bda769f8429" }
+lyra-vega-dbus = { git = "https://github.com/lyra-os-linux/lyra-vega-dbus", rev = "eba53e9284d70fba28e41deca8f9f08f38cf279c" }
 tokio = { version = "1.48.0", features = ["rt-multi-thread", "macros", "signal", "net", "io-util", "process"] }
 axum = { version = "0.8.9", features = ["ws"] }
 axum-server = { version = "0.8.0", features = ["tls-rustls-no-provider"] }
