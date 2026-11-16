@@ -995,7 +995,7 @@ checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
 [[package]]
 name = "lyra-vega-dbus"
 version = "5.5.0"
-source = "git+https://github.com/lyra-os-linux/lyra-vega-dbus?rev=eba53e9284d70fba28e41deca8f9f08f38cf279c#eba53e9284d70fba28e41deca8f9f08f38cf279c"
+source = "git+https://github.com/lyra-os-linux/lyra-vega-dbus?tag=v5.5.0#96f2dbab5c27f4dbb95153a7111dad5dacd184f9"
 dependencies = [
  "async-io",
  "async-lock",
