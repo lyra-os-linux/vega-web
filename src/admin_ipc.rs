@@ -456,7 +456,7 @@ impl Operation {
                 "Executar o diagnóstico de saúde: {}",
                 tests
                     .iter()
-                    .map(|id| crate::diagnostics_text::test_name(id))
+                    .map(|id| crate::diagnostics_text::test_name(crate::lang::Lang::Pt, id))
                     .collect::<Vec<_>>()
                     .join(", ")
             ),
@@ -491,7 +491,7 @@ impl Operation {
             Self::CleanupClean(ids) => format!(
                 "Liberar espaço: {}",
                 ids.iter()
-                    .map(|id| crate::diagnostics_text::cleanup_name(id))
+                    .map(|id| crate::diagnostics_text::cleanup_name(crate::lang::Lang::Pt, id))
                     .collect::<Vec<_>>()
                     .join(", ")
             ),

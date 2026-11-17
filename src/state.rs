@@ -8,7 +8,7 @@ use lyra_vega_dbus::VegaDbus;
 use rand::RngExt;
 use tokio::sync::{Semaphore, watch};
 
-use crate::auth::Authenticator;
+use crate::auth::{Authenticator, LoginLang};
 
 pub const SESSION_COOKIE: &str = "vega_web_session";
 
@@ -64,6 +64,9 @@ impl Default for SessionPolicy {
 
 pub struct Session {
     pub username: String,
+    /// Panel language: the one chosen on the login page, changed later by
+    /// the selector in the sidebar (vega-web#25).
+    lang: LoginLang,
     csrf: String,
     admin_binding: [u8; 32],
     created_at: Instant,
@@ -82,6 +85,7 @@ impl Session {
         rand::rng().fill(&mut admin_binding);
         Self {
             username,
+            lang: LoginLang::Pt,
             csrf: csrf.iter().map(|byte| format!("{byte:02x}")).collect(),
             admin_binding,
             created_at: now,
@@ -89,6 +93,11 @@ impl Session {
             expires: watch::channel(now).0,
             reads: HashMap::new(),
         }
+    }
+
+    pub fn with_lang(mut self, lang: LoginLang) -> Self {
+        self.lang = lang;
+        self
     }
 
     fn expired(&self, now: Instant, policy: SessionPolicy) -> bool {
@@ -200,15 +209,28 @@ impl SessionStore {
         Some(session.username.clone())
     }
 
-    /// The account and CSRF token of a live session, refreshing its activity.
-    pub fn identity_for(&self, token: &str, now: Instant) -> Option<(String, String)> {
+    /// The account, CSRF token and language of a live session, refreshing
+    /// its activity.
+    pub fn identity_for(&self, token: &str, now: Instant) -> Option<(String, String, LoginLang)> {
         let mut store = self.0.lock().unwrap();
         remove_expired(&mut store, now);
         let policy = store.policy;
         let session = store.values.get_mut(token)?;
         session.last_seen = now;
         session.publish_expiry(policy);
-        Some((session.username.clone(), session.csrf.clone()))
+        Some((session.username.clone(), session.csrf.clone(), session.lang))
+    }
+
+    /// Changes the language of a live session; false when it is gone.
+    pub fn set_lang(&self, token: &str, lang: LoginLang) -> bool {
+        let mut store = self.0.lock().unwrap();
+        match store.values.get_mut(token) {
+            Some(session) => {
+                session.lang = lang;
+                true
+            }
+            None => false,
+        }
     }
 
     pub fn lease(&self, token: &str, now: Instant) -> Option<SessionLease> {
@@ -570,5 +592,19 @@ mod tests {
         );
         limiter.success("10.0.0.1", "alice");
         assert!(limiter.check("10.0.0.1", "alice", now).is_none());
+    }
+
+    #[test]
+    fn session_keeps_the_login_language_until_changed() {
+        let now = Instant::now();
+        let store = SessionStore::new(SessionPolicy::default());
+        store.insert(
+            "token".into(),
+            Session::new("alice".into(), now).with_lang(LoginLang::Es),
+        );
+        assert_eq!(store.identity_for("token", now).unwrap().2, LoginLang::Es);
+        assert!(store.set_lang("token", LoginLang::En));
+        assert_eq!(store.identity_for("token", now).unwrap().2, LoginLang::En);
+        assert!(!store.set_lang("missing", LoginLang::Pt));
     }
 }

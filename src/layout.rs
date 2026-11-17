@@ -117,6 +117,16 @@ nav a.active .icon { color: #c4b5fd; opacity: 1; }
   transition: background-color var(--transition), color var(--transition);
 }
 .sidebar-foot .logout:hover { color: #eef0f4; background: rgb(255 255 255 / 6%); }
+.language-switch { display: flex; gap: 0.4rem; }
+.language-switch select {
+  flex: 1; min-width: 0; min-height: 0; padding: 0.35rem 0.5rem; border-radius: var(--radius-sm); font: inherit; font-size: 0.8rem;
+  color: #c4c9d4; background: rgb(255 255 255 / 5%); border: 1px solid rgb(255 255 255 / 8%);
+}
+.language-switch button {
+  min-height: 0; padding: 0.35rem 0.6rem; border-radius: var(--radius-sm); font: inherit; font-size: 0.8rem; cursor: pointer;
+  color: #8b91a1; background: transparent; border: 1px solid rgb(255 255 255 / 8%);
+}
+.language-switch button:hover { color: #eef0f4; background: rgb(255 255 255 / 6%); }
 aside .theme-switch { background: rgb(255 255 255 / 5%); border-color: rgb(255 255 255 / 8%); }
 aside .theme-switch button { color: #8b91a1; }
 aside .theme-switch button:hover { color: #eef0f4; }
@@ -473,104 +483,115 @@ fn theme_switch(lang: LoginLang) -> String {
     )
 }
 
+/// Labels are (pt, en, es).
+type Label = (&'static str, &'static str, &'static str);
+
 struct NavItem {
     href: &'static str,
-    label: &'static str,
+    label: Label,
     icon: &'static str,
 }
 
 struct NavGroup {
-    label: &'static str,
+    label: Label,
     items: &'static [NavItem],
 }
 
 const NAV: &[NavGroup] = &[
     NavGroup {
-        label: "Principal",
+        label: ("Principal", "Main", "Principal"),
         items: &[
             NavItem {
                 href: "/",
-                label: "Visão geral",
+                label: ("Visão geral", "Overview", "Resumen"),
                 icon: "dashboard",
             },
             NavItem {
                 href: "/software",
-                label: "Software",
+                label: ("Software", "Software", "Software"),
                 icon: "software",
             },
         ],
     },
     NavGroup {
-        label: "Sistema",
+        label: ("Sistema", "System", "Sistema"),
         items: &[
             NavItem {
                 href: "/servicos",
-                label: "Serviços",
+                label: ("Serviços", "Services", "Servicios"),
                 icon: "services",
             },
             NavItem {
                 href: "/usuarios",
-                label: "Usuários",
+                label: ("Usuários", "Users", "Usuarios"),
                 icon: "users",
             },
             NavItem {
                 href: "/rede",
-                label: "Rede e Firewall",
+                label: (
+                    "Rede e Firewall",
+                    "Network and Firewall",
+                    "Red y cortafuegos",
+                ),
                 icon: "network",
             },
             NavItem {
                 href: "/data-hora",
-                label: "Data e Hora",
+                label: ("Data e Hora", "Date and Time", "Fecha y hora"),
                 icon: "datetime",
             },
             NavItem {
                 href: "/hardware",
-                label: "Hardware e Kernel",
+                label: (
+                    "Hardware e Kernel",
+                    "Hardware and Kernel",
+                    "Hardware y núcleo",
+                ),
                 icon: "hardware",
             },
         ],
     },
     NavGroup {
-        label: "Dados",
+        label: ("Dados", "Data", "Datos"),
         items: &[
             NavItem {
                 href: "/armazenamento",
-                label: "Armazenamento",
+                label: ("Armazenamento", "Storage", "Almacenamiento"),
                 icon: "storage",
             },
             NavItem {
                 href: "/backup",
-                label: "Backup",
+                label: ("Backup", "Backup", "Copia de seguridad"),
                 icon: "backup",
             },
             NavItem {
                 href: "/snapshots",
-                label: "Snapshots",
+                label: ("Snapshots", "Snapshots", "Instantáneas"),
                 icon: "snapshots",
             },
         ],
     },
     NavGroup {
-        label: "Diagnóstico",
+        label: ("Diagnóstico", "Diagnostics", "Diagnóstico"),
         items: &[
             NavItem {
                 href: "/hardware/diagnostico",
-                label: "Saúde",
+                label: ("Saúde", "Health", "Salud"),
                 icon: "check",
             },
             NavItem {
                 href: "/logs",
-                label: "Logs",
+                label: ("Logs", "Logs", "Registros"),
                 icon: "logs",
             },
             NavItem {
                 href: "/monitor",
-                label: "Monitor",
+                label: ("Monitor", "Monitor", "Monitor"),
                 icon: "monitor",
             },
             NavItem {
                 href: "/terminal",
-                label: "Terminal",
+                label: ("Terminal", "Terminal", "Terminal"),
                 icon: "terminal",
             },
         ],
@@ -602,6 +623,8 @@ pub fn page_with(
             .map(|c| c.to_string())
             .unwrap_or_default(),
     );
+    let lang = user.lang;
+    let t = |label: Label| lang.text(label.0, label.1, label.2);
     let host = crate::host::identity();
     let hostname = crate::pages::html_escape(&host.hostname);
     let host_address = crate::pages::html_escape(&host.addresses.join(" · "));
@@ -622,13 +645,13 @@ pub fn page_with(
                         item.href,
                         class,
                         crate::pages::widgets::icon(item.icon),
-                        item.label
+                        t(item.label)
                     )
                 })
                 .collect();
             format!(
                 r#"<div><p class="nav-group-label">{}</p><nav>{items}</nav></div>"#,
-                group.label
+                t(group.label)
             )
         })
         .collect();
@@ -645,7 +668,7 @@ pub fn page_with(
 
     format!(
         r#"<!doctype html>
-<html lang="pt-br">
+<html lang="{lang_code}">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -656,14 +679,15 @@ pub fn page_with(
 <body>
 <div class="app-shell">
 <aside>
-<div class="brand"><img class="brand-logo" src="/assets/lyra-logo.png" alt=""><span class="brand-text"><span class="brand-name">LYRA OS</span><span class="brand-sub">Vega · painel</span></span></div>
+<div class="brand"><img class="brand-logo" src="/assets/lyra-logo.png" alt=""><span class="brand-text"><span class="brand-name">LYRA OS</span><span class="brand-sub">{brand_sub}</span></span></div>
 <div class="host-chip"><strong>{hostname}</strong><small>{host_address}</small></div>
 <div class="nav-groups">{nav_groups}</div>
 <div class="sidebar-foot">
 <p class="sidebar-user"><span class="sidebar-avatar" aria-hidden="true">{initial}</span><span class="sidebar-user-text"><strong>{username}</strong><small>{address}</small></span></p>
+{language_switch}
 <div class="sidebar-tools">
 {theme_switch}
-<form method="post" action="/logout"><input type="hidden" name="csrf" value="{logout_csrf}"><button type="submit" class="logout">{ICON_LOGOUT}Sair</button></form>
+<form method="post" action="/logout"><input type="hidden" name="csrf" value="{logout_csrf}"><button type="submit" class="logout">{ICON_LOGOUT}{logout}</button></form>
 </div>
 </div>
 </aside>
@@ -675,8 +699,37 @@ pub fn page_with(
 {THEME_WIRE}
 </body>
 </html>"#,
-        theme_switch = theme_switch(LoginLang::Pt),
+        theme_switch = theme_switch(lang),
+        language_switch = language_switch(lang, &logout_csrf),
+        lang_code = lang.code(),
+        brand_sub = t(("Vega · painel", "Vega · panel", "Vega · panel")),
+        logout = t(("Sair", "Log out", "Salir")),
         style = style(),
+    )
+}
+
+/// The session language selector (vega-web#25): a plain form, so it works
+/// without JavaScript; the button applies the choice.
+fn language_switch(lang: LoginLang, csrf: &str) -> String {
+    let t = |pt: &'static str, en: &'static str, es: &'static str| lang.text(pt, en, es);
+    let options: String = [
+        (LoginLang::Pt, "Português"),
+        (LoginLang::En, "English"),
+        (LoginLang::Es, "Español"),
+    ]
+    .iter()
+    .map(|(option, name)| {
+        format!(
+            r#"<option value="{}"{}>{name}</option>"#,
+            option.code(),
+            if *option == lang { " selected" } else { "" }
+        )
+    })
+    .collect();
+    format!(
+        r#"<form class="language-switch" method="post" action="/idioma"><input type="hidden" name="csrf" value="{csrf}"><select name="lang" aria-label="{label}">{options}</select><button type="submit">{apply}</button></form>"#,
+        label = t("Idioma", "Language", "Idioma"),
+        apply = t("Aplicar", "Apply", "Aplicar"),
     )
 }
 
@@ -883,4 +936,32 @@ document.querySelectorAll("[data-peek]").forEach(function (button) {{
             "Documentación del Server"
         ),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn user(lang: LoginLang) -> crate::auth::CurrentUser {
+        crate::auth::CurrentUser {
+            name: "alice".into(),
+            address: "10.0.0.2".into(),
+            csrf: "token".into(),
+            lang,
+        }
+    }
+
+    #[test]
+    fn shell_follows_the_session_language() {
+        let english = page("Title", "/", &user(LoginLang::En), "");
+        assert!(english.contains(r#"<html lang="en-US">"#));
+        assert!(english.contains("Overview"));
+        assert!(english.contains("Log out"));
+        assert!(english.contains(r#"<option value="en-US" selected>English</option>"#));
+        assert!(english.contains(r#"<form class="language-switch" method="post" action="/idioma"><input type="hidden" name="csrf" value="token">"#));
+        let portuguese = page("Título", "/", &user(LoginLang::Pt), "");
+        assert!(portuguese.contains(r#"<html lang="pt-BR">"#));
+        assert!(portuguese.contains("Visão geral"));
+        assert!(portuguese.contains(r#"<option value="pt-BR" selected>Português</option>"#));
+    }
 }

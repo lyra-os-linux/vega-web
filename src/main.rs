@@ -151,6 +151,7 @@ fn build_router(state: AppState) -> Router {
             "/terminal",
             get(pages::terminal::handler).post(pages::terminal::reauthenticate),
         )
+        .route("/idioma", post(auth::set_language))
         .route("/terminal/ws", get(pages::terminal::websocket))
         .route("/assets/xterm.js", get(pages::terminal::xterm_js))
         .route("/assets/xterm.css", get(pages::terminal::xterm_css))

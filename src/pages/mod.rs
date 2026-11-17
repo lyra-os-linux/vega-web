@@ -100,6 +100,7 @@ pub(crate) fn csrf_token(
 /// read-only with the notice.
 pub(crate) struct Actions {
     csrf: Option<String>,
+    lang: vega_web::lang::Lang,
 }
 
 impl Actions {
@@ -113,7 +114,10 @@ impl Actions {
         } else {
             None
         };
-        Self { csrf }
+        Self {
+            csrf,
+            lang: user.lang,
+        }
     }
 
     pub(crate) fn enabled(&self) -> bool {
@@ -163,8 +167,17 @@ impl Actions {
     pub(crate) fn notice(&self) -> String {
         if self.enabled() {
             String::new()
-        } else {
+        } else if self.lang == vega_web::lang::Lang::Pt {
             ADMINISTRATION_UNAVAILABLE_NOTICE.to_owned()
+        } else {
+            format!(
+                r#"<p class="notice">{}</p>"#,
+                self.lang.text(
+                    "",
+                    "Changes from the panel are disabled on this installation: the administrative broker (vega-web-admin.socket) is not configured. Use Vega in the local session or from the terminal.",
+                    "Los cambios desde el panel están desactivados en esta instalación: el broker administrativo (vega-web-admin.socket) no está configurado. Use Vega en la sesión local o desde la terminal.",
+                )
+            )
         }
     }
 }
@@ -189,18 +202,33 @@ impl Actions {
     /// The notice offering to fetch an administrative read with the user's
     /// password, or the plain explanation when the broker is not configured.
     pub(crate) fn unlock(&self, query: vega_web::admin_read::ReadQuery, context: &str) -> String {
+        let t = |pt: &'static str, en: &'static str, es: &'static str| self.lang.text(pt, en, es);
         let button = self.button(
-            "Desbloquear com senha",
+            t(
+                "Desbloquear com senha",
+                "Unlock with password",
+                "Desbloquear con contraseña",
+            ),
             &format!("read-{}", query.key()),
             &[],
         );
         if button.is_empty() {
             return format!(
-                r#"<div class="notice warn"><strong>{context}</strong><span>Esta leitura exige autorização de administrador e o broker administrativo não está configurado nesta instalação.</span></div>"#
+                r#"<div class="notice warn"><strong>{context}</strong><span>{}</span></div>"#,
+                t(
+                    "Esta leitura exige autorização de administrador e o broker administrativo não está configurado nesta instalação.",
+                    "This read requires administrator authorization and the administrative broker is not configured on this installation.",
+                    "Esta lectura requiere autorización de administrador y el broker administrativo no está configurado en esta instalación.",
+                )
             );
         }
         format!(
-            r#"<div class="notice"><strong>{context}</strong><span>Esta leitura exige autorização de administrador. Confirme com sua senha para lê-la com a sua identidade; o resultado fica disponível por cinco minutos.</span>{button}</div>"#
+            r#"<div class="notice"><strong>{context}</strong><span>{}</span>{button}</div>"#,
+            t(
+                "Esta leitura exige autorização de administrador. Confirme com sua senha para lê-la com a sua identidade; o resultado fica disponível por cinco minutos.",
+                "This read requires administrator authorization. Confirm with your password to read it with your identity; the result stays available for five minutes.",
+                "Esta lectura requiere autorización de administrador. Confirme con su contraseña para leerla con su identidad; el resultado queda disponible durante cinco minutos.",
+            )
         )
     }
 }

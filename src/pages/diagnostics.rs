@@ -20,6 +20,7 @@ use vega_web::admin_ipc::Operation;
 use vega_web::admin_read::{CleanupScan, LastPeriodic, NetworkCheck, ReadQuery};
 use vega_web::diagnostics_text as text;
 use vega_web::help_text;
+use vega_web::lang::Lang;
 
 use crate::auth::CurrentUser;
 use crate::state::{AppState, SESSION_COOKIE, SessionLease};
@@ -61,7 +62,7 @@ fn findings(stage: &Value) -> Vec<&Value> {
         .unwrap_or_default()
 }
 
-fn badge(verdict: &str) -> String {
+fn badge(lang: Lang, verdict: &str) -> String {
     let class = match verdict {
         "ok" => "on",
         "attention" | "fail" => "warn",
@@ -69,12 +70,17 @@ fn badge(verdict: &str) -> String {
     };
     format!(
         r#"<span class="badge {class}">{}</span>"#,
-        html_escape(text::verdict_label(verdict))
+        html_escape(text::verdict_label(lang, verdict))
     )
 }
 
-fn seconds(value: f64) -> String {
-    format!("{value:.1} s").replace('.', ",")
+fn seconds(lang: Lang, value: f64) -> String {
+    let text = format!("{value:.1} s");
+    if lang == Lang::En {
+        text
+    } else {
+        text.replace('.', ",")
+    }
 }
 
 /// After the broker accepted one of these operations, where the panel goes.
@@ -113,17 +119,27 @@ pub(crate) fn accepted(
             let page = if *redact { "ajuda" } else { "relatorio" };
             Some(Redirect::to(&format!("{PAGE}/{page}/{job}")).into_response())
         }
-        Operation::MarkLogsSeen(_) => Some(
-            render(
-                "Já vi os logs",
-                PAGE,
-                user,
-                format!(
-                    r#"<p class="notice success">Pronto. O próximo teste de logs só conta o que acontecer daqui em diante.</p><p><a class="button-link" href="{PAGE}">Voltar</a></p>"#
-                ),
+        Operation::MarkLogsSeen(_) => {
+            let t =
+                |pt: &'static str, en: &'static str, es: &'static str| user.lang.text(pt, en, es);
+            Some(
+                render(
+                    t("Já vi os logs", "I have seen the logs", "Ya vi los registros"),
+                    PAGE,
+                    user,
+                    format!(
+                        r#"<p class="notice success">{}</p><p><a class="button-link" href="{PAGE}">{}</a></p>"#,
+                        t(
+                            "Pronto. O próximo teste de logs só conta o que acontecer daqui em diante.",
+                            "Done. The next logs test only counts what happens from now on.",
+                            "Listo. La próxima prueba de registros solo cuenta lo que ocurra a partir de ahora.",
+                        ),
+                        t("Voltar", "Back", "Volver"),
+                    ),
+                )
+                .into_response(),
             )
-            .into_response(),
-        ),
+        }
         _ => None,
     }
 }
@@ -141,37 +157,61 @@ pub async fn handler(
     Query(query): Query<JobQuery>,
 ) -> Response {
     let actions = Actions::new(&state, &jar, &user);
+    let lang = user.lang;
+    let t = move |pt: &'static str, en: &'static str, es: &'static str| lang.text(pt, en, es);
     let diagnostics = state.dbus.diagnostics();
-    let mut body = String::from(
-        r#"<p>Testa disco, sistema, segurança, rede e boot sem alterar nada. As ações pedem a sua senha.</p>"#,
+    let mut body = format!(
+        "<p>{}</p>",
+        t(
+            "Testa disco, sistema, segurança, rede e boot sem alterar nada. As ações pedem a sua senha.",
+            "Tests disk, system, security, network and boot without changing anything. Actions ask for your password.",
+            "Prueba disco, sistema, seguridad, red y arranque sin cambiar nada. Las acciones piden su contraseña.",
+        )
     );
     body.push_str(&actions.notice());
     let current = diagnostics.current().await;
     let running = matches!(&current, Ok(job) if job.job_id != 0);
     match &current {
         Ok(job) if job.job_id != 0 => body.push_str(&format!(
-            r#"<section class="panel"><div class="panel-head"><h3>Diagnóstico {} em andamento</h3><span class="badge">{}%</span></div>
-<p>Testando: <strong>{}</strong></p>
+            r#"<section class="panel"><div class="panel-head"><h3>{} {} {}</h3><span class="badge">{}%</span></div>
+<p>{}: <strong>{}</strong></p>
 <div class="bar-track"><div class="bar-value bar-accent" style="width: {}%"></div></div>
-<p class="empty">A página se atualiza sozinha.</p></section>"#,
+<p class="empty">{}</p></section>"#,
+            t("Diagnóstico", "Diagnostics", "Diagnóstico"),
             job.job_id,
+            t("em andamento", "in progress", "en curso"),
             job.percent.min(100),
-            html_escape(text::test_name(&job.stage)),
+            t("Testando", "Testing", "Probando"),
+            html_escape(text::test_name(lang, &job.stage)),
             job.percent.min(100),
+            t("A página se atualiza sozinha.", "The page refreshes by itself.", "La página se actualiza sola."),
         )),
         Ok(_) => {
             if let Some(job) = query.job.filter(|job| *job > 0) {
                 body.push_str(&format!(
-                    r#"<div class="notice success"><strong>Diagnóstico {job} concluído.</strong><span>O relatório inclui trechos do journal, por isso a leitura pede a sua senha.</span>{}</div>"#,
+                    r#"<div class="notice success"><strong>{}</strong><span>{}</span>{}</div>"#,
+                    match lang {
+                        Lang::Pt => format!("Diagnóstico {job} concluído."),
+                        Lang::En => format!("Diagnostics {job} finished."),
+                        Lang::Es => format!("Diagnóstico {job} terminado."),
+                    },
+                    t(
+                        "O relatório inclui trechos do journal, por isso a leitura pede a sua senha.",
+                        "The report includes journal excerpts, so reading it asks for your password.",
+                        "El informe incluye fragmentos del journal, por eso la lectura pide su contraseña.",
+                    ),
                     actions.button(
-                        "Ver o relatório",
+                        t("Ver o relatório", "View the report", "Ver el informe"),
                         "diagnostics-report",
                         &[("job", &job.to_string()), ("redact", "false")]
                     )
                 ));
             }
         }
-        Err(error) => body.push_str(&error_body("Estado do diagnóstico indisponível", error)),
+        Err(error) => body.push_str(&error_body(
+            t("Estado do diagnóstico indisponível", "Diagnostics status unavailable", "Estado del diagnóstico no disponible"),
+            error,
+        )),
     }
 
     match diagnostics.list_tests().await {
@@ -182,62 +222,114 @@ pub async fn handler(
                 .filter(|id| tests.iter().any(|test| test.id == *id && test.available))
                 .collect();
             body.push_str(&format!(
-                r#"<div class="section-actions"><h3>Executar</h3>{}</div>
-<p>O modo rápido roda pacotes, disco, logs, plataforma, segurança, boot e rede, sem carga no processador. Leva alguns minutos.</p>"#,
+                r#"<div class="section-actions"><h3>{}</h3>{}</div>
+<p>{}</p>"#,
+                t("Executar", "Run", "Ejecutar"),
                 if quick.is_empty() {
                     String::new()
                 } else {
                     actions.primary(
-                        "Executar o diagnóstico rápido",
+                        t("Executar o diagnóstico rápido", "Run the quick diagnostics", "Ejecutar el diagnóstico rápido"),
                         "diagnostics-start",
                         &[("tests", &quick.join(","))],
                     )
-                }
+                },
+                t(
+                    "O modo rápido roda pacotes, disco, logs, plataforma, segurança, boot e rede, sem carga no processador. Leva alguns minutos.",
+                    "Quick mode runs packages, disk, logs, platform, security, boot and network, without processor load. It takes a few minutes.",
+                    "El modo rápido ejecuta paquetes, disco, registros, plataforma, seguridad, arranque y red, sin carga en el procesador. Tarda unos minutos.",
+                ),
             ));
             let rows: String = tests
                 .iter()
                 .map(|test| {
                     let note = if !test.available {
-                        format!("Indisponível ({})", html_escape(&test.reason))
+                        format!(
+                            "{} ({})",
+                            t("Indisponível", "Unavailable", "No disponible"),
+                            html_escape(&test.reason)
+                        )
                     } else if text::LOAD_TESTS.contains(&test.id.as_str()) {
-                        "Deixa o servidor lento por alguns minutos".to_owned()
+                        t(
+                            "Deixa o servidor lento por alguns minutos",
+                            "Slows the server down for a few minutes",
+                            "Ralentiza el servidor durante unos minutos",
+                        )
+                        .to_owned()
                     } else {
                         String::new()
                     };
                     let run = if test.available && test.id != "network" {
-                        actions.button("Executar", "diagnostics-start", &[("tests", &test.id)])
+                        actions.button(
+                            t("Executar", "Run", "Ejecutar"),
+                            "diagnostics-start",
+                            &[("tests", &test.id)],
+                        )
                     } else if test.available {
-                        r#"<a class="button-link" href="/rede/internet">Abrir</a>"#.to_owned()
+                        format!(
+                            r#"<a class="button-link" href="/rede/internet">{}</a>"#,
+                            t("Abrir", "Open", "Abrir")
+                        )
                     } else {
                         String::new()
                     };
                     format!(
                         "<tr><td>{}</td><td>~{} s</td><td>{note}</td><td>{run}</td></tr>",
-                        html_escape(text::test_name(&test.id)),
+                        html_escape(text::test_name(lang, &test.id)),
                         test.estimated_seconds,
                     )
                 })
                 .collect();
             body.push_str(&format!(
-                r#"<table><thead><tr><th>Teste</th><th>Duração</th><th>Observação</th><th></th></tr></thead><tbody>{rows}</tbody></table>"#
+                r#"<table><thead><tr><th>{}</th><th>{}</th><th>{}</th><th></th></tr></thead><tbody>{rows}</tbody></table>"#,
+                t("Teste", "Test", "Prueba"),
+                t("Duração", "Duration", "Duración"),
+                t("Observação", "Note", "Observación"),
             ));
         }
         Ok(_) => {}
-        Err(error) => body.push_str(&error_body("Lista de testes indisponível", error)),
+        Err(error) => body.push_str(&error_body(
+            t(
+                "Lista de testes indisponível",
+                "Test list unavailable",
+                "Lista de pruebas no disponible",
+            ),
+            error,
+        )),
     }
 
     body.push_str(&format!(
-        r#"<div class="section-actions"><h3>Relatório</h3>{}</div><p>O último relatório, com o resultado por teste, os achados e o que fazer.</p>"#,
+        r#"<div class="section-actions"><h3>{}</h3>{}</div><p>{}</p>"#,
+        t("Relatório", "Report", "Informe"),
         actions.button(
-            "Ver o último relatório",
+            t(
+                "Ver o último relatório",
+                "View the latest report",
+                "Ver el último informe"
+            ),
             "diagnostics-report",
             &[("job", "0"), ("redact", "false")]
-        )
+        ),
+        t(
+            "O último relatório, com o resultado por teste, os achados e o que fazer.",
+            "The latest report, with the result per test, the findings and what to do.",
+            "El último informe, con el resultado por prueba, los hallazgos y qué hacer.",
+        ),
     ));
 
-    body.push_str(&periodic_section(&state, &jar, &actions).await);
+    body.push_str(&periodic_section(&state, &jar, &actions, lang).await);
 
-    let mut response = render("Diagnóstico de saúde", PAGE, &user, body).into_response();
+    let mut response = render(
+        t(
+            "Diagnóstico de saúde",
+            "Health diagnostics",
+            "Diagnóstico de salud",
+        ),
+        PAGE,
+        &user,
+        body,
+    )
+    .into_response();
     if running {
         response
             .headers_mut()
@@ -246,27 +338,60 @@ pub async fn handler(
     response
 }
 
-async fn periodic_section(state: &AppState, jar: &PrivateCookieJar, actions: &Actions) -> String {
-    let mut section =
-        String::from(r#"<div class="section-actions"><h3>Verificação periódica</h3></div>"#);
+async fn periodic_section(
+    state: &AppState,
+    jar: &PrivateCookieJar,
+    actions: &Actions,
+    lang: Lang,
+) -> String {
+    let t = move |pt: &'static str, en: &'static str, es: &'static str| lang.text(pt, en, es);
+    let mut section = format!(
+        r#"<div class="section-actions"><h3>{}</h3></div>"#,
+        t(
+            "Verificação periódica",
+            "Periodic check",
+            "Verificación periódica"
+        )
+    );
     match state.dbus.diagnostics().get_periodic().await {
         Ok((enabled, frequency)) => {
             let daily = frequency == "daily";
             section.push_str(&format!(
-                "<p>Confere disco, logs, plataforma e segurança em segundo plano. Hoje: <strong>{}</strong>.</p>",
+                "<p>{} <strong>{}</strong>.</p>",
+                t(
+                    "Confere disco, logs, plataforma e segurança em segundo plano. Hoje:",
+                    "Checks disk, logs, platform and security in the background. Now:",
+                    "Revisa disco, registros, plataforma y seguridad en segundo plano. Ahora:",
+                ),
                 if !enabled {
-                    "desligada"
+                    t("desligada", "off", "desactivada")
                 } else if daily {
-                    "ligada, todo dia"
+                    t(
+                        "ligada, todo dia",
+                        "on, every day",
+                        "activada, todos los días",
+                    )
                 } else {
-                    "ligada, toda semana"
+                    t(
+                        "ligada, toda semana",
+                        "on, every week",
+                        "activada, todas las semanas",
+                    )
                 }
             ));
             let mut buttons = String::new();
             for (label, on, frequency) in [
-                ("Toda semana", "true", "weekly"),
-                ("Todo dia", "true", "daily"),
-                ("Desligar", "false", "weekly"),
+                (
+                    t("Toda semana", "Every week", "Todas las semanas"),
+                    "true",
+                    "weekly",
+                ),
+                (
+                    t("Todo dia", "Every day", "Todos los días"),
+                    "true",
+                    "daily",
+                ),
+                (t("Desligar", "Turn off", "Desactivar"), "false", "weekly"),
             ] {
                 let current = if on == "false" {
                     !enabled
@@ -283,12 +408,24 @@ async fn periodic_section(state: &AppState, jar: &PrivateCookieJar, actions: &Ac
             }
             section.push_str(&format!(r#"<div class="row-actions">{buttons}</div>"#));
         }
-        Err(error) => section.push_str(&error_body("Verificação periódica indisponível", error)),
+        Err(error) => section.push_str(&error_body(
+            t(
+                "Verificação periódica indisponível",
+                "Periodic check unavailable",
+                "Verificación periódica no disponible",
+            ),
+            error,
+        )),
     }
     match cached_read::<LastPeriodic>(state, jar, ReadQuery::LastPeriodic) {
-        Some(run) if run.job == 0 => section.push_str(
-            r#"<p class="empty">A verificação periódica ainda não rodou nesta instalação.</p>"#,
-        ),
+        Some(run) if run.job == 0 => section.push_str(&format!(
+            r#"<p class="empty">{}</p>"#,
+            t(
+                "A verificação periódica ainda não rodou nesta instalação.",
+                "The periodic check has not run on this installation yet.",
+                "La verificación periódica aún no se ha ejecutado en esta instalación.",
+            )
+        )),
         Some(run) => {
             let when = time::OffsetDateTime::from_unix_timestamp(run.finished)
                 .map(|at| {
@@ -313,30 +450,38 @@ async fn periodic_section(state: &AppState, jar: &PrivateCookieJar, actions: &Ac
                 .map(|stage| {
                     format!(
                         "<tr><td>{}</td><td>{}</td><td>{}</td></tr>",
-                        html_escape(text::test_name(&stage.id)),
-                        badge(&stage.verdict),
+                        html_escape(text::test_name(lang, &stage.id)),
+                        badge(lang, &stage.verdict),
                         html_escape(&stage.summary)
                     )
                 })
                 .collect();
             section.push_str(&format!(
-                r#"<section class="panel"><div class="panel-head"><h3>Última verificação: {when}</h3><span class="badge {}">{} novidade(s)</span></div>{}<table><tbody>{stages}</tbody></table>{}</section>"#,
+                r#"<section class="panel"><div class="panel-head"><h3>{}: {when}</h3><span class="badge {}">{} {}</span></div>{}<table><tbody>{stages}</tbody></table>{}</section>"#,
+                t("Última verificação", "Last check", "Última verificación"),
                 if run.novelties > 0 { "warn" } else { "on" },
                 run.novelties,
+                t("novidade(s)", "new item(s)", "novedad(es)"),
                 if novelties.is_empty() {
                     String::new()
                 } else {
                     format!("<ul>{novelties}</ul>")
                 },
                 actions.button(
-                    "Ver o relatório completo",
+                    t("Ver o relatório completo", "View the full report", "Ver el informe completo"),
                     "diagnostics-report",
                     &[("job", &run.job.to_string()), ("redact", "false")]
                 ),
             ));
         }
-        None => section
-            .push_str(&actions.unlock(ReadQuery::LastPeriodic, "Resultado da última verificação")),
+        None => section.push_str(&actions.unlock(
+            ReadQuery::LastPeriodic,
+            t(
+                "Resultado da última verificação",
+                "Result of the last check",
+                "Resultado de la última verificación",
+            ),
+        )),
     }
     section
 }
@@ -349,16 +494,29 @@ pub async fn report(
     Path(job): Path<u32>,
 ) -> Response {
     let actions = Actions::new(&state, &jar, &user);
+    let lang = user.lang;
+    let t = move |pt: &'static str, en: &'static str, es: &'static str| lang.text(pt, en, es);
+    let title = t(
+        "Relatório do diagnóstico",
+        "Diagnostics report",
+        "Informe del diagnóstico",
+    );
     let Some(report) = session_json(&state, &jar, &report_key(job, false)) else {
         let body = format!(
-            r#"<div class="notice"><strong>Relatório do diagnóstico {job}</strong><span>O relatório inclui trechos do journal. Confirme com sua senha para lê-lo; ele fica disponível por cinco minutos.</span>{}</div><p><a class="button-link" href="{PAGE}">Voltar</a></p>"#,
+            r#"<div class="notice"><strong>{title} {job}</strong><span>{}</span>{}</div><p><a class="button-link" href="{PAGE}">{}</a></p>"#,
+            t(
+                "O relatório inclui trechos do journal. Confirme com sua senha para lê-lo; ele fica disponível por cinco minutos.",
+                "The report includes journal excerpts. Confirm with your password to read it; it stays available for five minutes.",
+                "El informe incluye fragmentos del journal. Confirme con su contraseña para leerlo; queda disponible durante cinco minutos.",
+            ),
             actions.button(
-                "Ler o relatório",
+                t("Ler o relatório", "Read the report", "Leer el informe"),
                 "diagnostics-report",
                 &[("job", &job.to_string()), ("redact", "false")]
-            )
+            ),
+            t("Voltar", "Back", "Volver"),
         );
-        return render("Relatório do diagnóstico", PAGE, &user, body).into_response();
+        return render(title, PAGE, &user, body).into_response();
     };
     let remedies = state
         .dbus
@@ -367,20 +525,23 @@ pub async fn report(
         .await
         .unwrap_or_default();
     let csrf = csrf_token(&state, &jar, &user);
-    let body = report_body(job, &report, &remedies, &actions, csrf.as_deref());
-    render("Relatório do diagnóstico", PAGE, &user, body).into_response()
+    let body = report_body(lang, job, &report, &remedies, &actions, csrf.as_deref());
+    render(title, PAGE, &user, body).into_response()
 }
 
 fn report_body(
+    lang: Lang,
     job: u32,
     report: &Value,
     remedies: &[DiagnosticRemedy],
     actions: &Actions,
     csrf: Option<&str>,
 ) -> String {
+    let t = move |pt: &'static str, en: &'static str, es: &'static str| lang.text(pt, en, es);
     let host = report.get("host").cloned().unwrap_or(Value::Null);
     let mut body = format!(
-        r#"<p>Diagnóstico {job} · {} · {} · vegad {}</p>"#,
+        r#"<p>{} {job} · {} · {} · vegad {}</p>"#,
+        t("Diagnóstico", "Diagnostics", "Diagnóstico"),
         html_escape(str_of(report, "started")),
         html_escape(str_of(&host, "os")),
         html_escape(str_of(&host, "vegad")),
@@ -390,26 +551,29 @@ fn report_body(
         .map(|stage| {
             format!(
                 "<tr><td>{}</td><td>{}</td><td>{}</td></tr>",
-                html_escape(text::test_name(str_of(stage, "id"))),
-                badge(str_of(stage, "verdict")),
+                html_escape(text::test_name(lang, str_of(stage, "id"))),
+                badge(lang, str_of(stage, "verdict")),
                 html_escape(str_of(stage, "summary"))
             )
         })
         .collect();
     body.push_str(&format!(
-        r#"<table><thead><tr><th>Teste</th><th>Resultado</th><th>Resumo</th></tr></thead><tbody>{rows}</tbody></table>"#
+        r#"<table><thead><tr><th>{}</th><th>{}</th><th>{}</th></tr></thead><tbody>{rows}</tbody></table>"#,
+        t("Teste", "Test", "Prueba"),
+        t("Resultado", "Result", "Resultado"),
+        t("Resumo", "Summary", "Resumen"),
     ));
     if let Some(boot) = stages(report)
         .into_iter()
         .rfind(|stage| str_of(stage, "id") == "boot")
     {
-        body.push_str(&boot_view(boot));
+        body.push_str(&boot_view(lang, boot));
     }
     if let Some(network) = stages(report)
         .into_iter()
         .rfind(|stage| str_of(stage, "id") == "network")
     {
-        body.push_str(&network_steps(network));
+        body.push_str(&network_steps(lang, network));
     }
 
     let mut attention = String::new();
@@ -418,7 +582,7 @@ fn report_body(
         let stage_id = str_of(stage, "id");
         for finding in findings(stage) {
             let severity = str_of(finding, "severity");
-            let line = finding_view(stage_id, finding);
+            let line = finding_view(lang, stage_id, finding);
             if severity == "attention" || severity == "fail" {
                 attention.push_str(&line);
             } else {
@@ -426,15 +590,26 @@ fn report_body(
             }
         }
     }
-    body.push_str(r#"<div class="section-actions"><h3>Precisa de atenção</h3></div>"#);
+    body.push_str(&format!(
+        r#"<div class="section-actions"><h3>{}</h3></div>"#,
+        t("Precisa de atenção", "Needs attention", "Requiere atención")
+    ));
     if attention.is_empty() {
-        body.push_str(r#"<p class="notice success">Nenhum problema encontrado.</p>"#);
+        body.push_str(&format!(
+            r#"<p class="notice success">{}</p>"#,
+            t(
+                "Nenhum problema encontrado.",
+                "No problems found.",
+                "No se encontraron problemas."
+            )
+        ));
     } else {
         body.push_str(&attention);
     }
     if !info.is_empty() {
         body.push_str(&format!(
-            "<details><summary>Informações</summary>{info}</details>"
+            "<details><summary>{}</summary>{info}</details>",
+            t("Informações", "Information", "Información")
         ));
     }
 
@@ -449,21 +624,28 @@ fn report_body(
                 let label = finding
                     .map(|finding| str_of(finding, "text").to_owned())
                     .filter(|label| !label.is_empty())
-                    .unwrap_or_else(|| text::remedy_text(&remedy.remedy, &[]));
+                    .unwrap_or_else(|| text::remedy_text(lang, &remedy.remedy, &[]));
                 format!(
                     r#"<label class="check"><input type="checkbox" name="finding" value="{}:{}" checked> {}: {}</label>"#,
                     html_escape(&remedy.stage),
                     remedy.finding_index,
-                    html_escape(text::test_name(&remedy.stage)),
+                    html_escape(text::test_name(lang, &remedy.stage)),
                     html_escape(&label),
                 )
             })
             .collect();
         body.push_str(&format!(
-            r#"<div class="section-actions"><h3>Corrigir achados</h3></div>
-<p>Marque o que o Vega deve consertar. Antes, um snapshot permite desfazer; depois, os testes afetados rodam de novo.</p>
-<form method="post" action="{PAGE}/corrigir"><input type="hidden" name="csrf" value="{}"><input type="hidden" name="job" value="{job}">{items}<button type="submit" class="primary">Corrigir os marcados</button></form>"#,
-            html_escape(csrf)
+            r#"<div class="section-actions"><h3>{}</h3></div>
+<p>{}</p>
+<form method="post" action="{PAGE}/corrigir"><input type="hidden" name="csrf" value="{}"><input type="hidden" name="job" value="{job}">{items}<button type="submit" class="primary">{}</button></form>"#,
+            t("Corrigir achados", "Fix findings", "Corregir hallazgos"),
+            t(
+                "Marque o que o Vega deve consertar. Antes, um snapshot permite desfazer; depois, os testes afetados rodam de novo.",
+                "Check what Vega should fix. A snapshot is taken first so it can be undone; afterwards, the affected tests run again.",
+                "Marque lo que Vega debe arreglar. Antes, una instantánea permite deshacer; después, las pruebas afectadas se ejecutan de nuevo.",
+            ),
+            html_escape(csrf),
+            t("Corrigir os marcados", "Fix the checked ones", "Corregir los marcados"),
         ));
     }
 
@@ -473,25 +655,37 @@ fn report_body(
     let mut more = String::new();
     if logs {
         more.push_str(&actions.button(
-            "Já vi os logs",
+            t(
+                "Já vi os logs",
+                "I have seen the logs",
+                "Ya vi los registros",
+            ),
             "mark-logs-seen",
             &[("job", &job.to_string())],
         ));
     }
     more.push_str(&actions.button(
-        "Pedir ajuda",
+        t("Pedir ajuda", "Ask for help", "Pedir ayuda"),
         "diagnostics-report",
         &[("job", &job.to_string()), ("redact", "true")],
     ));
     body.push_str(&format!(
-        r#"<div class="section-actions"><h3>Mais</h3></div>
-<p>"Já vi os logs" faz os erros registrados até este diagnóstico deixarem de contar; o que acontecer depois volta a aparecer. "Pedir ajuda" monta um texto <strong>redigido</strong> para as Discussions ou para uma issue.</p>
-<div class="row-actions">{more}</div><p><a class="button-link" href="{PAGE}">Voltar</a></p>"#
+        r#"<div class="section-actions"><h3>{}</h3></div>
+<p>{}</p>
+<div class="row-actions">{more}</div><p><a class="button-link" href="{PAGE}">{}</a></p>"#,
+        t("Mais", "More", "Más"),
+        t(
+            r#""Já vi os logs" faz os erros registrados até este diagnóstico deixarem de contar; o que acontecer depois volta a aparecer. "Pedir ajuda" monta um texto <strong>redigido</strong> para as Discussions ou para uma issue."#,
+            r#""I have seen the logs" stops counting the errors logged up to this diagnostics run; what happens afterwards shows up again. "Ask for help" builds a <strong>redacted</strong> text for the Discussions or for an issue."#,
+            r#""Ya vi los registros" hace que los errores registrados hasta este diagnóstico dejen de contar; lo que ocurra después vuelve a aparecer. "Pedir ayuda" arma un texto <strong>redactado</strong> para las Discussions o para una issue."#,
+        ),
+        t("Voltar", "Back", "Volver"),
     ));
     body
 }
 
-fn finding_view(stage: &str, finding: &Value) -> String {
+fn finding_view(lang: Lang, stage: &str, finding: &Value) -> String {
+    let t = move |pt: &'static str, en: &'static str, es: &'static str| lang.text(pt, en, es);
     let severity = str_of(finding, "severity");
     let level = match severity {
         "fail" => "error",
@@ -511,11 +705,12 @@ fn finding_view(stage: &str, finding: &Value) -> String {
             })
             .unwrap_or_default();
         format!(
-            "<span>Conserto disponível: {}</span>",
-            html_escape(&text::remedy_text(remedy, &args))
+            "<span>{}: {}</span>",
+            t("Conserto disponível", "Fix available", "Arreglo disponible"),
+            html_escape(&text::remedy_text(lang, remedy, &args))
         )
     } else {
-        match text::guide(str_of(finding, "code"), severity) {
+        match text::guide(lang, str_of(finding, "code"), severity) {
             Some((guide, Some((href, label)))) => format!(
                 r#"<span>{} <a href="{href}">{}</a></span>"#,
                 html_escape(guide),
@@ -530,19 +725,21 @@ fn finding_view(stage: &str, finding: &Value) -> String {
         String::new()
     } else {
         format!(
-            "<details><summary>Dados brutos</summary><pre><code>{}</code></pre></details>",
+            "<details><summary>{}</summary><pre><code>{}</code></pre></details>",
+            t("Dados brutos", "Raw data", "Datos en bruto"),
             html_escape(raw)
         )
     };
     format!(
         r#"<div class="notice {level}"><strong>{}: {}</strong>{guide}{raw}</div>"#,
-        html_escape(text::test_name(stage)),
+        html_escape(text::test_name(lang, stage)),
         html_escape(str_of(finding, "text")),
     )
 }
 
 /// As fases do último boot e o que mais demorou antes do login.
-fn boot_view(stage: &Value) -> String {
+fn boot_view(lang: Lang, stage: &Value) -> String {
+    let t = move |pt: &'static str, en: &'static str, es: &'static str| lang.text(pt, en, es);
     let metrics = stage.get("metrics").cloned().unwrap_or(Value::Null);
     let Some(phases) = metrics.get("phases") else {
         return String::new();
@@ -551,7 +748,7 @@ fn boot_view(stage: &Value) -> String {
         .iter()
         .filter_map(|(id, label)| {
             let value = phases.get(*id).and_then(Value::as_f64).unwrap_or(0.0);
-            (value > 0.0).then_some((*label, value))
+            (value > 0.0).then_some((text::tr(lang, label), value))
         })
         .collect();
     let total = metrics
@@ -560,7 +757,12 @@ fn boot_view(stage: &Value) -> String {
         .unwrap_or_else(|| present.iter().map(|(_, value)| value).sum());
     let phases: String = present
         .iter()
-        .map(|(label, value)| format!("<tr><td>{label}</td><td>{}</td></tr>", seconds(*value)))
+        .map(|(label, value)| {
+            format!(
+                "<tr><td>{label}</td><td>{}</td></tr>",
+                seconds(lang, *value)
+            )
+        })
         .collect();
     let slowest: String = metrics
         .get("slowest")
@@ -571,25 +773,34 @@ fn boot_view(stage: &Value) -> String {
             format!(
                 "<tr><td><code>{}</code></td><td>{}</td></tr>",
                 html_escape(str_of(unit, "unit")),
-                seconds(unit.get("seconds").and_then(Value::as_f64).unwrap_or(0.0))
+                seconds(
+                    lang,
+                    unit.get("seconds").and_then(Value::as_f64).unwrap_or(0.0)
+                )
             )
         })
         .collect();
     format!(
-        r#"<section class="panel"><div class="panel-head"><h3>Último boot</h3><span class="badge">{}</span></div><table><tbody>{phases}</tbody></table>{}</section>"#,
-        seconds(total),
+        r#"<section class="panel"><div class="panel-head"><h3>{}</h3><span class="badge">{}</span></div><table><tbody>{phases}</tbody></table>{}</section>"#,
+        t("Último boot", "Last boot", "Último arranque"),
+        seconds(lang, total),
         if slowest.is_empty() {
             String::new()
         } else {
             format!(
-                "<h4>O que mais demorou antes do login</h4><table><tbody>{slowest}</tbody></table>"
+                "<h4>{}</h4><table><tbody>{slowest}</tbody></table>",
+                t(
+                    "O que mais demorou antes do login",
+                    "What took longest before login",
+                    "Lo que más tardó antes del inicio de sesión",
+                )
             )
         }
     )
 }
 
 /// Os passos do teste de rede, do cabo até a internet.
-fn network_steps(stage: &Value) -> String {
+fn network_steps(lang: Lang, stage: &Value) -> String {
     let rows: String = stage
         .get("metrics")
         .and_then(|metrics| metrics.get("steps"))
@@ -605,8 +816,8 @@ fn network_steps(stage: &Value) -> String {
             };
             format!(
                 r#"<tr><td>{}</td><td><span class="badge {class}">{}</span></td><td>{}</td></tr>"#,
-                html_escape(text::network_step_name(str_of(step, "id"))),
-                html_escape(text::network_step_status(status)),
+                html_escape(text::network_step_name(lang, str_of(step, "id"))),
+                html_escape(text::network_step_status(lang, status)),
                 html_escape(str_of(step, "detail")),
             )
         })
@@ -615,8 +826,13 @@ fn network_steps(stage: &Value) -> String {
         return String::new();
     }
     format!(
-        r#"<section class="panel"><div class="panel-head"><h3>Rede, passo a passo</h3>{}</div><table><tbody>{rows}</tbody></table></section>"#,
-        badge(str_of(stage, "verdict"))
+        r#"<section class="panel"><div class="panel-head"><h3>{}</h3>{}</div><table><tbody>{rows}</tbody></table></section>"#,
+        lang.text(
+            "Rede, passo a passo",
+            "Network, step by step",
+            "Red, paso a paso"
+        ),
+        badge(lang, str_of(stage, "verdict"))
     )
 }
 
@@ -691,16 +907,34 @@ async fn help(
     form: Option<HelpForm>,
 ) -> Response {
     let actions = Actions::new(&state, &jar, &user);
+    let lang = user.lang;
+    let t = move |pt: &'static str, en: &'static str, es: &'static str| lang.text(pt, en, es);
+    let page_title = t("Pedir ajuda", "Ask for help", "Pedir ayuda");
     let Some(report) = session_json(&state, &jar, &report_key(job, true)) else {
         let body = format!(
-            r#"<div class="notice"><strong>Pedir ajuda</strong><span>O texto sai do relatório <strong>redigido</strong> do diagnóstico {job}: sem nome do computador, usuários, endereços e caminhos pessoais. Confirme com sua senha para lê-lo.</span>{}</div>"#,
+            r#"<div class="notice"><strong>{page_title}</strong><span>{}</span>{}</div>"#,
+            match lang {
+                Lang::Pt => format!(
+                    "O texto sai do relatório <strong>redigido</strong> do diagnóstico {job}: sem nome do computador, usuários, endereços e caminhos pessoais. Confirme com sua senha para lê-lo."
+                ),
+                Lang::En => format!(
+                    "The text comes from the <strong>redacted</strong> report of diagnostics {job}: no computer name, users, addresses or personal paths. Confirm with your password to read it."
+                ),
+                Lang::Es => format!(
+                    "El texto sale del informe <strong>redactado</strong> del diagnóstico {job}: sin nombre del equipo, usuarios, direcciones ni rutas personales. Confirme con su contraseña para leerlo."
+                ),
+            },
             actions.button(
-                "Ler o relatório redigido",
+                t(
+                    "Ler o relatório redigido",
+                    "Read the redacted report",
+                    "Leer el informe redactado"
+                ),
                 "diagnostics-report",
                 &[("job", &job.to_string()), ("redact", "true")]
             )
         );
-        return render("Pedir ajuda", PAGE, &user, body).into_response();
+        return render(page_title, PAGE, &user, body).into_response();
     };
     let Some(csrf) = csrf_token(&state, &jar, &user) else {
         return Redirect::to("/login").into_response();
@@ -708,13 +942,22 @@ async fn help(
     let description = match &form {
         Some(form) => {
             if !super::admin::matching_csrf(&csrf, &form.csrf) {
-                return (StatusCode::FORBIDDEN, "Confirmação de sessão inválida.").into_response();
+                return (
+                    StatusCode::FORBIDDEN,
+                    t(
+                        "Confirmação de sessão inválida.",
+                        "Invalid session confirmation.",
+                        "Confirmación de sesión no válida.",
+                    ),
+                )
+                    .into_response();
             }
             form.descricao.chars().take(2000).collect::<String>()
         }
         None => String::new(),
     };
     let help = help_text::build(
+        lang,
         &report,
         &description,
         env!("CARGO_PKG_VERSION"),
@@ -723,34 +966,77 @@ async fn help(
     let title = {
         let first = description.lines().next().unwrap_or("").trim();
         if first.is_empty() {
-            "Ajuda com o Lyra OS Server".to_owned()
+            t(
+                "Ajuda com o Lyra OS Server",
+                "Help with Lyra OS Server",
+                "Ayuda con Lyra OS Server",
+            )
+            .to_owned()
         } else {
-            format!("Ajuda: {}", help_text::cut(first, 80))
+            format!(
+                "{}: {}",
+                t("Ajuda", "Help", "Ayuda"),
+                help_text::cut(first, 80)
+            )
         }
     };
     let links = if form.is_some() {
         format!(
-            r#"<div class="row-actions"><a class="button primary" href="{}" target="_blank" rel="noopener noreferrer">Perguntar nas Discussions</a><a class="button" href="{}" target="_blank" rel="noopener noreferrer">Abrir uma issue</a></div>
-<p class="empty">Os links abrem o GitHub com o texto preenchido. Se o texto for longo, ele vai encurtado no link; copie o texto completo daqui.</p>"#,
-            html_escape(&help_text::url(false, &title, &help)),
-            html_escape(&help_text::url(true, &title, &help)),
+            r#"<div class="row-actions"><a class="button primary" href="{}" target="_blank" rel="noopener noreferrer">{}</a><a class="button" href="{}" target="_blank" rel="noopener noreferrer">{}</a></div>
+<p class="empty">{}</p>"#,
+            html_escape(&help_text::url(lang, false, &title, &help)),
+            t(
+                "Perguntar nas Discussions",
+                "Ask in the Discussions",
+                "Preguntar en las Discussions"
+            ),
+            html_escape(&help_text::url(lang, true, &title, &help)),
+            t("Abrir uma issue", "Open an issue", "Abrir una issue"),
+            t(
+                "Os links abrem o GitHub com o texto preenchido. Se o texto for longo, ele vai encurtado no link; copie o texto completo daqui.",
+                "The links open GitHub with the text filled in. If the text is long, the link carries a shortened version; copy the full text from here.",
+                "Los enlaces abren GitHub con el texto completado. Si el texto es largo, el enlace lleva una versión acortada; copie el texto completo desde aquí.",
+            ),
         )
     } else {
         String::new()
     };
     let body = format!(
-        r#"<p>Descreva o problema. O texto abaixo junta a sua descrição e o relatório <strong>redigido</strong> do diagnóstico {job}; confira antes de enviar.</p>
+        r#"<p>{}</p>
 <form method="post" action="{PAGE}/ajuda/{job}"><input type="hidden" name="csrf" value="{}">
-<label>O que está acontecendo<br><textarea name="descricao" rows="4" maxlength="2000" required>{}</textarea></label>
-<button type="submit" class="primary">Montar o texto</button></form>
+<label>{}<br><textarea name="descricao" rows="4" maxlength="2000" required>{}</textarea></label>
+<button type="submit" class="primary">{}</button></form>
 {links}
-<h3>Texto</h3><pre class="help-text"><code>{}</code></pre>
-<p><a class="button-link" href="{PAGE}/relatorio/{job}">Voltar ao relatório</a></p>"#,
+<h3>{}</h3><pre class="help-text"><code>{}</code></pre>
+<p><a class="button-link" href="{PAGE}/relatorio/{job}">{}</a></p>"#,
+        match lang {
+            Lang::Pt => format!(
+                "Descreva o problema. O texto abaixo junta a sua descrição e o relatório <strong>redigido</strong> do diagnóstico {job}; confira antes de enviar."
+            ),
+            Lang::En => format!(
+                "Describe the problem. The text below joins your description and the <strong>redacted</strong> report of diagnostics {job}; check it before sending."
+            ),
+            Lang::Es => format!(
+                "Describa el problema. El texto de abajo une su descripción y el informe <strong>redactado</strong> del diagnóstico {job}; revíselo antes de enviarlo."
+            ),
+        },
         html_escape(&csrf),
+        t(
+            "O que está acontecendo",
+            "What is happening",
+            "Qué está pasando"
+        ),
         html_escape(&description),
+        t("Montar o texto", "Build the text", "Armar el texto"),
+        t("Texto", "Text", "Texto"),
         html_escape(&help),
+        t(
+            "Voltar ao relatório",
+            "Back to the report",
+            "Volver al informe"
+        ),
     );
-    render("Pedir ajuda", PAGE, &user, body).into_response()
+    render(page_title, PAGE, &user, body).into_response()
 }
 
 /// Rede e Firewall → Minha internet não funciona.
@@ -760,8 +1046,20 @@ pub async fn network(
     Extension(user): Extension<CurrentUser>,
 ) -> Response {
     let actions = Actions::new(&state, &jar, &user);
-    let mut body = String::from(
-        "<p>Testa a conexão passo a passo, do cabo ou Wi-Fi até a internet, e aponta onde está o problema. Não muda nada sem a sua confirmação.</p>",
+    let lang = user.lang;
+    let t = move |pt: &'static str, en: &'static str, es: &'static str| lang.text(pt, en, es);
+    let page_title = t(
+        "Minha internet não funciona",
+        "My internet does not work",
+        "Mi internet no funciona",
+    );
+    let mut body = format!(
+        "<p>{}</p>",
+        t(
+            "Testa a conexão passo a passo, do cabo ou Wi-Fi até a internet, e aponta onde está o problema. Não muda nada sem a sua confirmação.",
+            "Tests the connection step by step, from the cable or Wi-Fi to the internet, and points out where the problem is. It changes nothing without your confirmation.",
+            "Prueba la conexión paso a paso, del cable o Wi-Fi hasta internet, e indica dónde está el problema. No cambia nada sin su confirmación.",
+        )
     );
     body.push_str(&actions.notice());
     let check = session_json(&state, &jar, "network")
@@ -774,13 +1072,20 @@ pub async fn network(
                 .rfind(|stage| str_of(stage, "id") == "network");
             match network {
                 Some(stage) => {
-                    body.push_str(&network_steps(stage));
+                    body.push_str(&network_steps(lang, stage));
                     if str_of(stage, "verdict") == "ok" {
-                        body.push_str(r#"<p class="notice success">A conexão está funcionando.</p>"#);
+                        body.push_str(&format!(
+                            r#"<p class="notice success">{}</p>"#,
+                            t(
+                                "A conexão está funcionando.",
+                                "The connection is working.",
+                                "La conexión funciona."
+                            )
+                        ));
                     }
                     for finding in findings(stage) {
                         if str_of(finding, "severity") != "info" {
-                            body.push_str(&finding_view("network", finding));
+                            body.push_str(&finding_view(lang, "network", finding));
                         }
                     }
                     let remedies = state
@@ -797,31 +1102,59 @@ pub async fn network(
                             .join(",");
                         let label = remedies
                             .iter()
-                            .map(|remedy| text::remedy_text(&remedy.remedy, &[]))
+                            .map(|remedy| text::remedy_text(lang, &remedy.remedy, &[]))
                             .collect::<Vec<_>>()
                             .join("; ");
                         body.push_str(&format!(
-                            r#"<div class="notice"><strong>Conserto disponível</strong><span>{}</span>{}</div>"#,
+                            r#"<div class="notice"><strong>{}</strong><span>{}</span>{}</div>"#,
+                            t("Conserto disponível", "Fix available", "Arreglo disponible"),
                             html_escape(&label),
                             actions.primary(
-                                "Aplicar o conserto",
+                                t("Aplicar o conserto", "Apply the fix", "Aplicar el arreglo"),
                                 "repair-findings",
                                 &[("job", &check.job.to_string()), ("findings", &findings)]
                             )
                         ));
                     }
                 }
-                None => body.push_str(r#"<p class="notice warn">O teste de rede não rodou.</p>"#),
+                None => body.push_str(&format!(
+                    r#"<p class="notice warn">{}</p>"#,
+                    t(
+                        "O teste de rede não rodou.",
+                        "The network test did not run.",
+                        "La prueba de red no se ejecutó."
+                    )
+                )),
             }
-            body.push_str(&actions.button("Testar de novo", "network-check", &[]));
+            body.push_str(&actions.button(
+                t("Testar de novo", "Test again", "Probar de nuevo"),
+                "network-check",
+                &[],
+            ));
         }
         None => body.push_str(&format!(
-            r#"<div class="notice"><strong>Minha internet não funciona</strong><span>Leva poucos segundos. Confirme com sua senha.</span>{}</div>"#,
-            actions.primary("Testar a conexão", "network-check", &[])
+            r#"<div class="notice"><strong>{page_title}</strong><span>{}</span>{}</div>"#,
+            t(
+                "Leva poucos segundos. Confirme com sua senha.",
+                "It takes a few seconds. Confirm with your password.",
+                "Tarda unos segundos. Confirme con su contraseña.",
+            ),
+            actions.primary(
+                t(
+                    "Testar a conexão",
+                    "Test the connection",
+                    "Probar la conexión"
+                ),
+                "network-check",
+                &[]
+            )
         )),
     }
-    body.push_str(r#"<p><a class="button-link" href="/rede">Voltar para Rede</a></p>"#);
-    render("Minha internet não funciona", "/rede", &user, body).into_response()
+    body.push_str(&format!(
+        r#"<p><a class="button-link" href="/rede">{}</a></p>"#,
+        t("Voltar para Rede", "Back to Network", "Volver a Red")
+    ));
+    render(page_title, "/rede", &user, body).into_response()
 }
 
 /// Armazenamento → Liberar espaço: as categorias do sistema medidas pelo
@@ -832,13 +1165,25 @@ pub(crate) fn cleanup_section(
     user: &CurrentUser,
 ) -> String {
     let actions = Actions::new(state, jar, user);
-    let mut section = String::from(
-        r#"<div class="section-actions" id="liberar"><h3>Liberar espaço</h3></div><p>Apaga relatórios de falha, logs antigos, pacotes baixados e outros itens do sistema que podem sair com segurança.</p>"#,
+    let lang = user.lang;
+    let t = move |pt: &'static str, en: &'static str, es: &'static str| lang.text(pt, en, es);
+    let free_up = t("Liberar espaço", "Free up space", "Liberar espacio");
+    let mut section = format!(
+        r#"<div class="section-actions" id="liberar"><h3>{free_up}</h3></div><p>{}</p>"#,
+        t(
+            "Apaga relatórios de falha, logs antigos, pacotes baixados e outros itens do sistema que podem sair com segurança.",
+            "Deletes crash reports, old logs, downloaded packages and other system items that can safely go.",
+            "Borra informes de fallos, registros antiguos, paquetes descargados y otros elementos del sistema que pueden eliminarse con seguridad.",
+        )
     );
     let Some(scan) = cached_read::<CleanupScan>(state, jar, ReadQuery::CleanupScan) else {
         section.push_str(&actions.unlock(
             ReadQuery::CleanupScan,
-            "Medir o espaço que pode ser liberado",
+            t(
+                "Medir o espaço que pode ser liberado",
+                "Measure the space that can be freed",
+                "Medir el espacio que se puede liberar",
+            ),
         ));
         return section;
     };
@@ -849,42 +1194,62 @@ pub(crate) fn cleanup_section(
     let mut blocked = String::new();
     for category in &scan.categories {
         let size = if category.size_unknown {
-            format!(
-                "pelo menos {}, tamanho desconhecido",
-                category.count.unwrap_or(0)
-            )
+            let count = category.count.unwrap_or(0);
+            match lang {
+                Lang::Pt => format!("pelo menos {count}, tamanho desconhecido"),
+                Lang::En => format!("at least {count}, unknown size"),
+                Lang::Es => format!("al menos {count}, tamaño desconocido"),
+            }
         } else {
-            text::bytes(category.bytes)
+            text::bytes(lang, category.bytes)
         };
         if category.can_clean {
             items.push_str(&format!(
                 r#"<label class="check"><input type="checkbox" name="category" value="{}"{}> {} — {}</label>"#,
                 html_escape(&category.id),
                 if text::cleanup_default_on(&category.id) { " checked" } else { "" },
-                html_escape(text::cleanup_name(&category.id)),
+                html_escape(text::cleanup_name(lang, &category.id)),
                 html_escape(&size),
             ));
         } else {
             blocked.push_str(&format!(
                 "<li>{}: {}</li>",
-                html_escape(text::cleanup_name(&category.id)),
+                html_escape(text::cleanup_name(lang, &category.id)),
                 html_escape(&text::cleanup_reason(
+                    lang,
                     category.reason.as_deref().unwrap_or("nothing")
                 ))
             ));
         }
     }
     if items.is_empty() {
-        section.push_str(r#"<p class="notice success">Nada para limpar agora.</p>"#);
+        section.push_str(&format!(
+            r#"<p class="notice success">{}</p>"#,
+            t(
+                "Nada para limpar agora.",
+                "Nothing to clean right now.",
+                "Nada que limpiar ahora."
+            )
+        ));
     } else {
         section.push_str(&format!(
-            r#"<form method="post" action="/armazenamento/limpar"><input type="hidden" name="csrf" value="{}">{items}<p class="empty">Kernels antigos e snapshots só saem se você marcar. Não dá para desfazer.</p><button type="submit" class="primary">Liberar espaço</button></form>"#,
-            html_escape(&csrf)
+            r#"<form method="post" action="/armazenamento/limpar"><input type="hidden" name="csrf" value="{}">{items}<p class="empty">{}</p><button type="submit" class="primary">{free_up}</button></form>"#,
+            html_escape(&csrf),
+            t(
+                "Kernels antigos e snapshots só saem se você marcar. Não dá para desfazer.",
+                "Old kernels and snapshots only go if you check them. This cannot be undone.",
+                "Los núcleos antiguos y las instantáneas solo se eliminan si los marca. No se puede deshacer.",
+            ),
         ));
     }
     if !blocked.is_empty() {
         section.push_str(&format!(
-            "<details><summary>Sem limpeza agora</summary><ul>{blocked}</ul></details>"
+            "<details><summary>{}</summary><ul>{blocked}</ul></details>",
+            t(
+                "Sem limpeza agora",
+                "No cleanup right now",
+                "Sin limpieza ahora"
+            )
         ));
     }
     section
@@ -1075,49 +1440,90 @@ pub async fn cleanup_progress(
     let Some(job) = job else {
         return StatusCode::NOT_FOUND.into_response();
     };
+    let lang = user.lang;
+    let t = move |pt: &'static str, en: &'static str, es: &'static str| lang.text(pt, en, es);
     let rows: String = job
         .categories
         .iter()
         .map(|(id, result, freed)| {
             format!(
                 "<tr><td>{}</td><td>{}</td><td>{}</td></tr>",
-                html_escape(text::cleanup_name(id)),
+                html_escape(text::cleanup_name(lang, id)),
                 match result.as_str() {
-                    "ok" => "Limpo",
-                    "skipped" => "Pulado",
-                    "failed" => "Falhou",
+                    "ok" => t("Limpo", "Cleaned", "Limpio"),
+                    "skipped" => t("Pulado", "Skipped", "Omitido"),
+                    "failed" => t("Falhou", "Failed", "Falló"),
                     other => other,
                 },
-                text::bytes(*freed)
+                text::bytes(lang, *freed)
             )
         })
         .collect();
     let headline = if job.running {
-        r#"<p class="notice">Limpando… a página se atualiza sozinha.</p>"#.to_owned()
+        format!(
+            r#"<p class="notice">{}</p>"#,
+            t(
+                "Limpando… a página se atualiza sozinha.",
+                "Cleaning… the page refreshes by itself.",
+                "Limpiando… la página se actualiza sola.",
+            )
+        )
     } else {
+        let freed = t("liberados", "freed", "liberados");
         match job.result.as_str() {
             "ok" => format!(
-                r#"<p class="notice success"><strong>{} liberados.</strong></p>"#,
-                text::bytes(job.freed)
+                r#"<p class="notice success"><strong>{} {freed}.</strong></p>"#,
+                text::bytes(lang, job.freed)
             ),
             "partial" => format!(
-                r#"<p class="notice warn"><strong>{} liberados.</strong> Algumas categorias não puderam ser limpas; veja o log do vegad.</p>"#,
-                text::bytes(job.freed)
+                r#"<p class="notice warn"><strong>{} {freed}.</strong> {}</p>"#,
+                text::bytes(lang, job.freed),
+                t(
+                    "Algumas categorias não puderam ser limpas; veja o log do vegad.",
+                    "Some categories could not be cleaned; see the vegad log.",
+                    "Algunas categorías no se pudieron limpiar; vea el registro de vegad.",
+                )
             ),
-            "failed" => r#"<p class="notice error">A limpeza falhou; veja o log do vegad.</p>"#.to_owned(),
-            _ => r#"<p class="notice warn">Resultado não confirmado. Meça de novo antes de repetir.</p>"#.to_owned(),
+            "failed" => format!(
+                r#"<p class="notice error">{}</p>"#,
+                t(
+                    "A limpeza falhou; veja o log do vegad.",
+                    "The cleanup failed; see the vegad log.",
+                    "La limpieza falló; vea el registro de vegad.",
+                )
+            ),
+            _ => format!(
+                r#"<p class="notice warn">{}</p>"#,
+                t(
+                    "Resultado não confirmado. Meça de novo antes de repetir.",
+                    "Result not confirmed. Measure again before repeating.",
+                    "Resultado no confirmado. Mida de nuevo antes de repetir.",
+                )
+            ),
         }
     };
     let body = format!(
-        r#"{headline}<p>Limpeza {}</p>{}<p><a class="button-link" href="/armazenamento#liberar">Voltar para Armazenamento</a></p>"#,
+        r#"{headline}<p>{} {}</p>{}<p><a class="button-link" href="/armazenamento#liberar">{}</a></p>"#,
+        t("Limpeza", "Cleanup", "Limpieza"),
         job.job,
         if rows.is_empty() {
             String::new()
         } else {
             format!("<table><tbody>{rows}</tbody></table>")
-        }
+        },
+        t(
+            "Voltar para Armazenamento",
+            "Back to Storage",
+            "Volver a Almacenamiento"
+        ),
     );
-    let mut response = render("Liberar espaço", "/armazenamento", &user, body).into_response();
+    let mut response = render(
+        t("Liberar espaço", "Free up space", "Liberar espacio"),
+        "/armazenamento",
+        &user,
+        body,
+    )
+    .into_response();
     if job.running {
         response
             .headers_mut()
