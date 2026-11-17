@@ -470,3 +470,72 @@ async fn authorization_integration_admin_frontdoor_rejects_forgery_before_broker
     );
     server.abort();
 }
+
+#[tokio::test]
+#[ignore = "requires a private D-Bus: bash scripts/check-authorization-contracts.sh"]
+async fn authorization_integration_language_selector_requires_the_session_csrf() {
+    assert_eq!(
+        std::env::var("VEGA_WEB_TEST_PRIVATE_BUS").as_deref(),
+        Ok("1"),
+        "run through scripts/check-authorization-contracts.sh"
+    );
+    let key = Key::generate();
+    let sessions = SessionStore::new(SessionPolicy::default());
+    let state = AppState {
+        cleanup_jobs: Default::default(),
+        dbus: lyra_vega_dbus::VegaDbus::connect().await.unwrap(),
+        sessions: sessions.clone(),
+        cookie_key: key.clone(),
+        authenticator: Arc::new(UnusedAuthenticator),
+        login_limiter: LoginLimiter::new(LoginPolicy::default()),
+        pam_slots: Arc::new(Semaphore::new(1)),
+        terminal_grants: TerminalGrants::default(),
+        terminal_slots: Arc::new(Semaphore::new(1)),
+        terminal_socket: "/unused".into(),
+        admin_socket: None,
+        audit: Default::default(),
+    };
+    let router = build_router(state);
+    let tcp = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = tcp.local_addr().unwrap();
+    let server = tokio::spawn(async move { axum::serve(tcp, router).await.unwrap() });
+    sessions.insert(
+        "token".into(),
+        state::Session::new("alice".into(), Instant::now()),
+    );
+    let csrf = sessions.lease("token", Instant::now()).unwrap().csrf;
+    let cookie = cookie_header(&key, "token");
+
+    for body in ["lang=en-US".to_owned(), "csrf=wrong&lang=en-US".to_owned()] {
+        let response = request(address, "POST", "/idioma", &cookie, &body).await;
+        assert!(response.starts_with("HTTP/1.1 403"), "{response}");
+    }
+    let page = request(address, "GET", "/rede/internet", &cookie, "").await;
+    assert!(page.contains(r#"<html lang="pt-BR">"#), "{page}");
+
+    let body = format!("csrf={csrf}&lang=en-US");
+    let mut stream = TcpStream::connect(address).await.unwrap();
+    stream.write_all(format!(
+        "POST /idioma HTTP/1.1\r\nHost: {address}\r\nCookie: {cookie}\r\nReferer: https://{address}/rede/internet\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        body.len()
+    ).as_bytes()).await.unwrap();
+    let mut response = String::new();
+    stream.read_to_string(&mut response).await.unwrap();
+    assert!(response.starts_with("HTTP/1.1 303"), "{response}");
+    assert!(
+        response.contains("location: /rede/internet\r\n"),
+        "{response}"
+    );
+
+    let page = request(address, "GET", "/rede/internet", &cookie, "").await;
+    assert!(page.contains(r#"<html lang="en-US">"#), "{page}");
+    assert!(page.contains("My internet does not work"));
+    assert!(page.contains("Back to Network"));
+
+    sessions.remove("token");
+    let response = request(address, "POST", "/idioma", &cookie, &body).await;
+    assert!(response.starts_with("HTTP/1.1 303"), "{response}");
+    assert!(response.contains("location: /login\r\n"));
+    eprintln!("PASS: language selector requires the session CSRF and a live session");
+    server.abort();
+}

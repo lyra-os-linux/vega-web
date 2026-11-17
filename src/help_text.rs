@@ -1,7 +1,11 @@
 //! Texto do "Pedir ajuda" (add-help-report), montado a partir do relatório
 //! **redigido** do diagnóstico. Porta do `help-text.js` do Vega: mesmo
-//! limite, mesma ordem e o mesmo corte dos dados brutos.
+//! limite, mesma ordem e o mesmo corte dos dados brutos. O texto sai no
+//! idioma do painel (vega-web#25).
 use serde_json::Value;
+
+use crate::diagnostics_text::{test_name, verdict_label};
+use crate::lang::Lang;
 
 /// Limite do texto: a URL de issue e de discussão fica abaixo de ~8 KB.
 pub const HELP_LIMIT: usize = 6000;
@@ -39,34 +43,56 @@ struct Finding {
 /// Monta o Markdown do pedido de ajuda. Só entram os achados de atenção e
 /// falha. Se passar de `limit`, os dados brutos são encurtados por igual;
 /// nenhum achado sai do texto.
-pub fn build(report: &Value, description: &str, vega: &str, limit: usize) -> String {
+pub fn build(lang: Lang, report: &Value, description: &str, vega: &str, limit: usize) -> String {
+    let t = |pt: &'static str, en: &'static str, es: &'static str| lang.text(pt, en, es);
     let host = report.get("host").cloned().unwrap_or(Value::Null);
     let stages: Vec<&Value> = report
         .get("stages")
         .and_then(Value::as_array)
         .map(|stages| stages.iter().collect())
         .unwrap_or_default();
-    let mut head = vec!["## O que está acontecendo".to_owned(), String::new()];
+    let mut head = vec![
+        format!(
+            "## {}",
+            t(
+                "O que está acontecendo",
+                "What is happening",
+                "Qué está pasando"
+            )
+        ),
+        String::new(),
+    ];
     let description = description.trim();
     head.push(if description.is_empty() {
-        "(sem descrição)".to_owned()
+        t("(sem descrição)", "(no description)", "(sin descripción)").to_owned()
     } else {
         description.to_owned()
     });
-    head.extend(["".into(), "## Sistema".into(), "".into()]);
+    let system = t("Sistema", "System", "Sistema");
+    head.extend(["".into(), format!("## {system}"), "".into()]);
     for (label, value) in [
-        ("Computador", str_field(&host, "product")),
-        ("Sistema", str_field(&host, "os")),
+        (
+            t("Computador", "Computer", "Equipo"),
+            str_field(&host, "product"),
+        ),
+        (system, str_field(&host, "os")),
         ("Kernel", str_field(&host, "kernel")),
         ("vegad", str_field(&host, "vegad")),
         ("vega-web", vega),
-        ("Diagnóstico", str_field(report, "started")),
+        (
+            t("Diagnóstico", "Diagnostics", "Diagnóstico"),
+            str_field(report, "started"),
+        ),
     ] {
         if !value.is_empty() {
             head.push(format!("- {label}: {value}"));
         }
     }
-    head.extend(["".into(), "## Testes".into(), "".into()]);
+    head.extend([
+        "".into(),
+        format!("## {}", t("Testes", "Tests", "Pruebas")),
+        "".into(),
+    ]);
     for stage in &stages {
         let summary = str_field(stage, "summary");
         let summary = if summary.is_empty() {
@@ -76,8 +102,8 @@ pub fn build(report: &Value, description: &str, vega: &str, limit: usize) -> Str
         };
         head.push(format!(
             "- {}: {}{summary}",
-            crate::diagnostics_text::test_name(str_field(stage, "id")),
-            crate::diagnostics_text::verdict_label(str_field(stage, "verdict")),
+            test_name(lang, str_field(stage, "id")),
+            verdict_label(lang, str_field(stage, "verdict")),
         ));
     }
 
@@ -96,7 +122,7 @@ pub fn build(report: &Value, description: &str, vega: &str, limit: usize) -> Str
             findings.push(Finding {
                 title: format!(
                     "- **{}:** {} (`{}`)",
-                    crate::diagnostics_text::test_name(str_field(stage, "id")),
+                    test_name(lang, str_field(stage, "id")),
                     str_field(finding, "text"),
                     str_field(finding, "code"),
                 ),
@@ -108,7 +134,11 @@ pub fn build(report: &Value, description: &str, vega: &str, limit: usize) -> Str
     let compose = |raw_max: usize| {
         let mut lines = head.clone();
         if !findings.is_empty() {
-            lines.extend(["".into(), "## Achados".into(), "".into()]);
+            lines.extend([
+                "".into(),
+                format!("## {}", t("Achados", "Findings", "Hallazgos")),
+                "".into(),
+            ]);
             for finding in &findings {
                 lines.push(finding.title.clone());
                 if !finding.raw.is_empty() && raw_max > 0 {
@@ -168,13 +198,20 @@ pub fn encode_component(text: &str) -> String {
 
 /// A URL de uma discussão (Q&A) ou de uma issue com o texto já preenchido,
 /// encurtado até caber no limite do GitHub.
-pub fn url(issue: bool, title: &str, body: &str) -> String {
+pub fn url(lang: Lang, issue: bool, title: &str, body: &str) -> String {
     let base = if issue {
         format!("{HELP_REPO}/issues/new?template=help.md&title=")
     } else {
         format!("{HELP_REPO}/discussions/new?category=q-a&title=")
     };
-    let note = "\n\n(Texto encurtado; copie o texto completo da página do painel.)";
+    let note = format!(
+        "\n\n{}",
+        lang.text(
+            "(Texto encurtado; copie o texto completo da página do painel.)",
+            "(Text shortened; copy the full text from the panel page.)",
+            "(Texto acortado; copie el texto completo de la página del panel.)",
+        )
+    );
     let build = |text: &str| {
         format!(
             "{base}{}&body={}",
@@ -209,7 +246,7 @@ mod tests {
         );
         json!({
             "started": "2026-10-30T10:00:00-03:00",
-            "host": {"product": "Standard PC", "os": "Lyra OS Server 16.1 RC 3", "kernel": "6.12.0",
+            "host": {"product": "Standard PC", "os": "Lyra OS Server 16.1 (Delos)", "kernel": "6.12.0",
                      "vegad": "5.6.2", "hostname": "[redacted]"},
             "stages": [
                 {"id": "logs", "verdict": "attention", "summary": "3 erros", "findings": items},
@@ -221,6 +258,7 @@ mod tests {
     #[test]
     fn small_report_keeps_everything_but_info() {
         let text = build(
+            Lang::Pt,
             &report(200, 3),
             "A internet cai toda hora",
             "5.2.0",
@@ -238,7 +276,7 @@ mod tests {
 
     #[test]
     fn big_raw_data_is_cut_but_every_finding_stays() {
-        let text = build(&report(1000, 40), "x", "5.2.0", HELP_LIMIT);
+        let text = build(Lang::Pt, &report(1000, 40), "x", "5.2.0", HELP_LIMIT);
         assert!(text.chars().count() <= HELP_LIMIT);
         assert_eq!(text.matches("`logs.item").count(), 40);
         assert!(text.contains('…'));
@@ -247,7 +285,7 @@ mod tests {
 
     #[test]
     fn redacted_values_pass_through_untouched_and_empty_description_is_marked() {
-        let text = build(&report(10, 1), "  ", "5.2.0", HELP_LIMIT);
+        let text = build(Lang::Pt, &report(10, 1), "  ", "5.2.0", HELP_LIMIT);
         assert!(!text.contains("hostname"));
         assert!(text.contains("(sem descrição)"));
     }
@@ -255,13 +293,30 @@ mod tests {
     #[test]
     fn urls_fit_the_github_limit_and_encode_like_the_browser() {
         assert_eq!(encode_component("a b&c/ç"), "a%20b%26c%2F%C3%A7");
-        let body = build(&report(1000, 40), "x", "5.2.0", HELP_LIMIT);
+        let body = build(Lang::Pt, &report(1000, 40), "x", "5.2.0", HELP_LIMIT);
         for issue in [false, true] {
-            let link = url(issue, "Ajuda: rede", &body);
+            let link = url(Lang::Pt, issue, "Ajuda: rede", &body);
             assert!(link.len() <= URL_LIMIT, "{}", link.len());
             assert!(link.starts_with(HELP_REPO));
         }
-        assert!(url(true, "t", "b").contains("/issues/new?template=help.md&title=t&body=b"));
-        assert!(url(false, "t", "b").contains("/discussions/new?category=q-a&title=t&body=b"));
+        assert!(
+            url(Lang::Pt, true, "t", "b").contains("/issues/new?template=help.md&title=t&body=b")
+        );
+        assert!(
+            url(Lang::Pt, false, "t", "b").contains("/discussions/new?category=q-a&title=t&body=b")
+        );
+    }
+
+    #[test]
+    fn text_follows_the_panel_language() {
+        let english = build(Lang::En, &report(10, 1), " ", "5.2.0", HELP_LIMIT);
+        assert!(english.contains("## What is happening"));
+        assert!(english.contains("(no description)"));
+        assert!(english.contains("- Computer: Standard PC"));
+        assert!(english.contains("- Logs and failures: Attention — 3 erros"));
+        assert!(english.contains("## Findings"));
+        let spanish = build(Lang::Es, &report(10, 1), " ", "5.2.0", HELP_LIMIT);
+        assert!(spanish.contains("## Qué está pasando"));
+        assert!(spanish.contains("## Pruebas"));
     }
 }

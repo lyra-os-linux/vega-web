@@ -46,6 +46,8 @@ pub struct CurrentUser {
     pub address: String,
     /// The session's CSRF token, for the forms every page renders (logout).
     pub csrf: String,
+    /// The panel language of this session (vega-web#25).
+    pub lang: LoginLang,
 }
 
 pub async fn require_session(
@@ -59,7 +61,7 @@ pub async fn require_session(
         .and_then(|cookie| state.sessions.identity_for(cookie.value(), Instant::now()));
 
     match identity {
-        Some((username, csrf)) => {
+        Some((username, csrf, lang)) => {
             let address = req
                 .extensions()
                 .get::<ConnectInfo<SocketAddr>>()
@@ -69,6 +71,7 @@ pub async fn require_session(
                 name: username,
                 address,
                 csrf,
+                lang,
             });
             next.run(req).await
         }
@@ -81,40 +84,9 @@ pub async fn require_session(
 }
 
 /// Language of the login page, chosen with `?lang=` and carried by the form.
-/// The panel itself keeps its single language; this only covers the page a
-/// visitor sees before authenticating.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum LoginLang {
-    Pt,
-    En,
-    Es,
-}
-
-impl LoginLang {
-    pub fn parse(value: Option<&str>) -> Self {
-        match value.map(str::trim) {
-            Some("en" | "en-US") => Self::En,
-            Some("es" | "es-ES") => Self::Es,
-            _ => Self::Pt,
-        }
-    }
-
-    pub fn code(self) -> &'static str {
-        match self {
-            Self::Pt => "pt-BR",
-            Self::En => "en-US",
-            Self::Es => "es-ES",
-        }
-    }
-
-    pub fn text<'a>(self, pt: &'a str, en: &'a str, es: &'a str) -> &'a str {
-        match self {
-            Self::Pt => pt,
-            Self::En => en,
-            Self::Es => es,
-        }
-    }
-}
+/// The session keeps the choice and the sidebar selector changes it; pages
+/// not translated yet stay in Portuguese (vega-web#25).
+pub use vega_web::lang::Lang as LoginLang;
 
 /// `?lang=` on the login page; any other or malformed query is ignored.
 fn query_lang(query: Option<&str>) -> LoginLang {
@@ -209,9 +181,10 @@ pub async fn login_submit(
             eprintln!("vega-web: login bem-sucedido ip={ip} usuário={username:?}");
             state.audit.record(&username, &ip, "Entrada no painel");
             let token = new_session_token();
-            state
-                .sessions
-                .insert(token.clone(), Session::new(username, Instant::now()));
+            state.sessions.insert(
+                token.clone(),
+                Session::new(username, Instant::now()).with_lang(lang),
+            );
             let cookie = session_cookie(token);
             (jar.add(cookie), Redirect::to("/")).into_response()
         }
@@ -273,6 +246,51 @@ pub async fn logout(
         Redirect::to("/login"),
     )
         .into_response()
+}
+
+#[derive(Deserialize, Default)]
+pub struct LanguageForm {
+    #[serde(default)]
+    csrf: String,
+    #[serde(default)]
+    lang: String,
+}
+
+/// The sidebar language selector. Same CSRF rule as logout; afterwards the
+/// browser goes back to the page it came from (same origin only).
+pub async fn set_language(
+    State(state): State<AppState>,
+    axum::Extension(user): axum::Extension<CurrentUser>,
+    jar: PrivateCookieJar,
+    headers: axum::http::HeaderMap,
+    form: Result<Form<LanguageForm>, axum::extract::rejection::FormRejection>,
+) -> Response {
+    let form = form.map(|Form(form)| form).unwrap_or_default();
+    if !crate::pages::admin::matching_csrf(&user.csrf, &form.csrf) {
+        return (
+            StatusCode::FORBIDDEN,
+            "pedido de idioma sem o token da sessão",
+        )
+            .into_response();
+    }
+    if let Some(cookie) = jar.get(SESSION_COOKIE) {
+        state
+            .sessions
+            .set_lang(cookie.value(), LoginLang::parse(Some(&form.lang)));
+    }
+    let back = headers
+        .get(axum::http::header::REFERER)
+        .and_then(|value| value.to_str().ok())
+        .and_then(same_origin_path)
+        .unwrap_or("/");
+    Redirect::to(back).into_response()
+}
+
+/// The path of a Referer that points at this panel; anything else is `None`.
+fn same_origin_path(referer: &str) -> Option<&str> {
+    let rest = referer.strip_prefix("https://")?;
+    let path = &rest[rest.find('/')?..];
+    (!path.starts_with("//") && !path.contains('\\')).then_some(path)
 }
 
 fn new_session_token() -> String {
@@ -372,5 +390,17 @@ mod tests {
         )
         .await;
         assert!(result.is_err());
+    }
+
+    #[test]
+    fn language_selector_returns_only_to_panel_paths() {
+        assert_eq!(
+            same_origin_path("https://servidor:8443/hardware/diagnostico?job=3"),
+            Some("/hardware/diagnostico?job=3")
+        );
+        assert_eq!(same_origin_path("https://servidor:8443"), None);
+        assert_eq!(same_origin_path("http://servidor/rede"), None);
+        assert_eq!(same_origin_path("https://servidor//evil.example/"), None);
+        assert_eq!(same_origin_path("https://servidor/\\evil.example"), None);
     }
 }
