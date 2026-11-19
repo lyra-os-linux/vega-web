@@ -24,24 +24,36 @@ pub async fn handler(
     jar: PrivateCookieJar,
     Extension(user): Extension<CurrentUser>,
 ) -> Response {
+    let lang = user.lang;
+    let t = move |pt: &'static str, en: &'static str, es: &'static str| lang.text(pt, en, es);
     let token = jar
         .get(SESSION_COOKIE)
         .map(|cookie| cookie.value().to_string())
         .unwrap_or_default();
     if !state.terminal_grants.valid(&token, Instant::now()) {
-        let body = r#"<p>Por segurança, confirme sua senha antes de abrir um shell completo.</p>
+        let body = r#"<p>{intro}</p>
 <form method="post" action="/terminal">
 <input type="hidden" name="csrf" value="{csrf}">
-<label>Senha<br><input type="password" name="password" autocomplete="current-password" required autofocus></label>
-<button type="submit">Abrir terminal</button>
+<label>{password}<br><input type="password" name="password" autocomplete="current-password" required autofocus></label>
+<button type="submit">{open}</button>
 </form>"#
+            .replace(
+                "{intro}",
+                t(
+                    "Por segurança, confirme sua senha antes de abrir um shell completo.",
+                    "For security, confirm your password before opening a full shell.",
+                    "Por seguridad, confirme su contraseña antes de abrir un shell completo.",
+                ),
+            )
+            .replace("{password}", t("Senha", "Password", "Contraseña"))
+            .replace("{open}", t("Abrir terminal", "Open terminal", "Abrir terminal"))
             .replace("{csrf}", &super::html_escape(&user.csrf));
         return render("Terminal", "/terminal", &user, body).into_response();
     }
     let body = r#"
-<p>Shell completo do servidor. O acesso é permitido somente a administradores do grupo <code>wheel</code>.</p>
-<div id="terminal-status" class="badge">Conectando…</div>
-<div id="terminal" aria-label="Terminal do servidor"></div>
+<p>{intro}</p>
+<div id="terminal-status" class="badge">{connecting}</div>
+<div id="terminal" aria-label="{label}"></div>
 <style>
 .content { max-width: none; }
 #terminal { height: calc(100vh - 13rem); min-height: 28rem; margin-top: 1rem; padding: .65rem;
@@ -75,14 +87,37 @@ pub async fn handler(
   const scheme = location.protocol === 'https:' ? 'wss:' : 'ws:';
   socket = new WebSocket(`${scheme}//${location.host}/terminal/ws`);
   socket.binaryType = 'arraybuffer';
-  socket.onopen = () => { status.textContent = 'Conectado'; status.classList.add('on'); resize(); terminal.focus(); };
+  socket.onopen = () => { status.textContent = '{connected}'; status.classList.add('on'); resize(); terminal.focus(); };
   socket.onmessage = event => terminal.write(typeof event.data === 'string' ? event.data : new Uint8Array(event.data));
-  socket.onclose = event => { status.textContent = event.reason || 'Sessão encerrada'; status.classList.remove('on'); terminal.write('\r\n\x1b[31m[Sessão encerrada]\x1b[0m\r\n'); };
-  socket.onerror = () => { status.textContent = 'Falha na conexão'; };
+  socket.onclose = () => { status.textContent = '{closed}'; status.classList.remove('on'); terminal.write('\r\n\x1b[31m[{closed}]\x1b[0m\r\n'); };
+  socket.onerror = () => { status.textContent = '{failed}'; };
   terminal.onData(data => { if (socket.readyState === WebSocket.OPEN) socket.send(new TextEncoder().encode(data)); });
 })();
 </script>"#;
-    render("Terminal", "/terminal", &user, body.to_string()).into_response()
+    let body = body
+        .replace(
+            "{intro}",
+            t(
+                "Shell completo do servidor. O acesso é permitido somente a administradores do grupo <code>wheel</code>.",
+                "Full server shell. Access is allowed only to administrators in the <code>wheel</code> group.",
+                "Shell completo del servidor. El acceso se permite solo a administradores del grupo <code>wheel</code>.",
+            ),
+        )
+        .replace("{connecting}", t("Conectando…", "Connecting…", "Conectando…"))
+        .replace(
+            "{label}",
+            t("Terminal do servidor", "Server terminal", "Terminal del servidor"),
+        )
+        .replace("{connected}", t("Conectado", "Connected", "Conectado"))
+        .replace(
+            "{closed}",
+            t("Sessão encerrada", "Session closed", "Sesión cerrada"),
+        )
+        .replace(
+            "{failed}",
+            t("Falha na conexão", "Connection failed", "Error de conexión"),
+        );
+    render("Terminal", "/terminal", &user, body).into_response()
 }
 
 #[derive(Deserialize)]
@@ -138,8 +173,20 @@ pub async fn reauthenticate(
     } else {
         let delay = state.login_limiter.failure(&ip, &username, Instant::now());
         tokio::time::sleep(delay).await;
-        let body = r#"<p class="error">Senha inválida.</p><p>O terminal não foi aberto.</p>
-<form method="post" action="/terminal"><input type="hidden" name="csrf" value="{csrf}"><label>Senha<br><input type="password" name="password" autocomplete="current-password" required autofocus></label><button type="submit">Tentar novamente</button></form>"#
+        let t = |pt: &'static str, en: &'static str, es: &'static str| user.lang.text(pt, en, es);
+        let body = r#"<p class="error">{invalid}</p><p>{not_opened}</p>
+<form method="post" action="/terminal"><input type="hidden" name="csrf" value="{csrf}"><label>{password}<br><input type="password" name="password" autocomplete="current-password" required autofocus></label><button type="submit">{retry}</button></form>"#
+            .replace("{invalid}", t("Senha inválida.", "Invalid password.", "Contraseña no válida."))
+            .replace(
+                "{not_opened}",
+                t(
+                    "O terminal não foi aberto.",
+                    "The terminal was not opened.",
+                    "La terminal no se abrió.",
+                ),
+            )
+            .replace("{password}", t("Senha", "Password", "Contraseña"))
+            .replace("{retry}", t("Tentar novamente", "Try again", "Intentar de nuevo"))
             .replace("{csrf}", &super::html_escape(&user.csrf));
         render("Terminal", "/terminal", &user, body).into_response()
     }

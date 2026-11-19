@@ -208,7 +208,7 @@ pub async fn handler(
                 ));
             }
         }
-        Err(error) => body.push_str(&error_body(
+        Err(error) => body.push_str(&error_body(lang,
             t("Estado do diagnóstico indisponível", "Diagnostics status unavailable", "Estado del diagnóstico no disponible"),
             error,
         )),
@@ -289,6 +289,7 @@ pub async fn handler(
         }
         Ok(_) => {}
         Err(error) => body.push_str(&error_body(
+            lang,
             t(
                 "Lista de testes indisponível",
                 "Test list unavailable",
@@ -409,6 +410,7 @@ async fn periodic_section(
             section.push_str(&format!(r#"<div class="row-actions">{buttons}</div>"#));
         }
         Err(error) => section.push_str(&error_body(
+            lang,
             t(
                 "Verificação periódica indisponível",
                 "Periodic check unavailable",
@@ -1301,11 +1303,17 @@ struct CleanupJob {
 pub struct CleanupJobs(Arc<Mutex<HashMap<String, CleanupJob>>>);
 
 impl CleanupJobs {
-    fn reserve(&self, binding: [u8; 32]) -> Result<String, String> {
+    fn reserve(&self, binding: [u8; 32], lang: Lang) -> Result<String, String> {
         let mut jobs = self.0.lock().unwrap();
         jobs.retain(|_, job| job.created.elapsed() < Duration::from_secs(3 * 60 * 60));
         if jobs.len() >= 64 || jobs.values().any(|job| job.running) {
-            return Err("Já há uma limpeza em andamento pelo painel. Aguarde o fim dela.".into());
+            return Err(lang
+                .text(
+                    "Já há uma limpeza em andamento pelo painel. Aguarde o fim dela.",
+                    "A cleanup is already running from the panel. Wait for it to finish.",
+                    "Ya hay una limpieza en curso desde el panel. Espere a que termine.",
+                )
+                .into());
         }
         let mut random = [0u8; 16];
         rand::rng().fill(&mut random);
@@ -1351,8 +1359,9 @@ impl Drop for PreparedCleanup {
 pub(crate) async fn prepare_cleanup(
     state: &AppState,
     binding: [u8; 32],
+    lang: Lang,
 ) -> Result<PreparedCleanup, String> {
-    let id = state.cleanup_jobs.reserve(binding)?;
+    let id = state.cleanup_jobs.reserve(binding, lang)?;
     let mut pending = PreparedCleanup {
         jobs: state.cleanup_jobs.clone(),
         id: Some(id),
@@ -1533,17 +1542,29 @@ pub async fn cleanup_progress(
 }
 
 /// The dashboard tile: the periodic check state, without a password.
-pub(crate) async fn dashboard_row(state: &AppState) -> Option<(String, String)> {
+pub(crate) async fn dashboard_row(state: &AppState, lang: Lang) -> Option<(String, String)> {
+    let t = move |pt: &'static str, en: &'static str, es: &'static str| lang.text(pt, en, es);
     let (enabled, frequency) = state.dbus.diagnostics().get_periodic().await.ok()?;
     let value = if !enabled {
-        "desligada".to_owned()
+        t("desligada", "off", "desactivada")
     } else if frequency == "daily" {
-        "ligada, todo dia".to_owned()
+        t(
+            "ligada, todo dia",
+            "on, every day",
+            "activada, todos los días",
+        )
     } else {
-        "ligada, toda semana".to_owned()
+        t(
+            "ligada, toda semana",
+            "on, every week",
+            "activada, todas las semanas",
+        )
     };
     Some((
         if enabled { "" } else { "warn" }.to_owned(),
-        format!(r#"{value} <a href="{PAGE}">Diagnóstico</a>"#),
+        format!(
+            r#"{value} <a href="{PAGE}">{}</a>"#,
+            t("Diagnóstico", "Diagnostics", "Diagnóstico")
+        ),
     ))
 }

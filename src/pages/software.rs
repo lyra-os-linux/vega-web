@@ -21,6 +21,8 @@ pub async fn handler(
     Extension(user): Extension<CurrentUser>,
     Query(query): Query<SearchQuery>,
 ) -> Html<String> {
+    let lang = user.lang;
+    let t = move |pt: &'static str, en: &'static str, es: &'static str| lang.text(pt, en, es);
     let actions = Actions::new(&state, &jar, &user);
     let client = state.dbus.software();
     let mut body = actions.notice();
@@ -28,47 +30,101 @@ pub async fn handler(
     let mut header = String::new();
 
     match client.package_manager_name().await {
-        Ok(name) => subtitle = format!("Gerenciador de pacotes: {}", html_escape(&name)),
-        Err(error) => body.push_str(&error_body("Gerenciador de pacotes indisponível", error)),
+        Ok(name) => {
+            subtitle = format!(
+                "{}: {}",
+                t(
+                    "Gerenciador de pacotes",
+                    "Package manager",
+                    "Gestor de paquetes"
+                ),
+                html_escape(&name)
+            )
+        }
+        Err(error) => body.push_str(&error_body(
+            lang,
+            t(
+                "Gerenciador de pacotes indisponível",
+                "Package manager unavailable",
+                "Gestor de paquetes no disponible",
+            ),
+            error,
+        )),
     }
 
     body.push_str(&format!(
         r#"<form method="get" action="/software" class="inline-form">
-<label>Buscar pacotes<input type="search" name="q" value="{}" placeholder="nome do pacote"></label>
-<button type="submit">Buscar</button>
+<label>{}<input type="search" name="q" value="{}" placeholder="{}"></label>
+<button type="submit">{}</button>
 </form>"#,
-        html_escape(&query.q)
+        t("Buscar pacotes", "Search packages", "Buscar paquetes"),
+        html_escape(&query.q),
+        t("nome do pacote", "package name", "nombre del paquete"),
+        t("Buscar", "Search", "Buscar"),
     ));
     if !query.q.trim().is_empty() {
         match client.search_native(query.q.trim()).await {
             Ok(results) => body.push_str(&package_table(
-                "Resultados da busca",
+                t(
+                    "Resultados da busca",
+                    "Search results",
+                    "Resultados de la búsqueda",
+                ),
                 &results,
                 &actions,
                 true,
             )),
-            Err(error) => body.push_str(&error_body("Busca indisponível", error)),
+            Err(error) => body.push_str(&error_body(
+                lang,
+                t(
+                    "Busca indisponível",
+                    "Search unavailable",
+                    "Búsqueda no disponible",
+                ),
+                error,
+            )),
         }
     }
     match client.list_native_updates().await {
         Ok(updates) => {
             if !updates.is_empty() {
                 header.push_str(&actions.primary(
-                    &format!("Aplicar {} atualização(ões)", updates.len()),
+                    &format!(
+                        "{} {} {}",
+                        t("Aplicar", "Apply", "Aplicar"),
+                        updates.len(),
+                        t("atualização(ões)", "update(s)", "actualización(es)"),
+                    ),
                     "update-all",
                     &[],
                 ));
             }
             body.push_str(&package_table(
-                "Atualizações disponíveis",
+                t(
+                    "Atualizações disponíveis",
+                    "Available updates",
+                    "Actualizaciones disponibles",
+                ),
                 &updates,
                 &actions,
                 false,
             ));
         }
-        Err(error) => body.push_str(&error_body("Lista de atualizações indisponível", error)),
+        Err(error) => body.push_str(&error_body(
+            lang,
+            t(
+                "Lista de atualizações indisponível",
+                "Update list unavailable",
+                "Lista de actualizaciones no disponible",
+            ),
+            error,
+        )),
     }
-    header.push_str(&actions.button("Limpar cache", "clear-cache", &[]));
+    header.push_str(&actions.button(
+        t("Limpar cache", "Clear cache", "Limpiar caché"),
+        "clear-cache",
+        &[],
+    ));
     match client.list_repos().await {
         Ok(mut repos) => {
             repos.sort_by(|a, b| a.name.cmp(&b.name));
@@ -77,13 +133,13 @@ pub async fn handler(
                 .map(|repo| {
                     let toggle = if repo.enabled {
                         actions.button(
-                            "Desabilitar",
+                            t("Desabilitar", "Disable", "Deshabilitar"),
                             "repo-enabled",
                             &[("name", &repo.name), ("enabled", "false")],
                         )
                     } else {
                         actions.button(
-                            "Habilitar",
+                            t("Habilitar", "Enable", "Habilitar"),
                             "repo-enabled",
                             &[("name", &repo.name), ("enabled", "true")],
                         )
@@ -93,19 +149,30 @@ pub async fn handler(
                         html_escape(&repo.name),
                         if repo.enabled { "on" } else { "off" },
                         if repo.enabled {
-                            "habilitado"
+                            t("habilitado", "enabled", "habilitado")
                         } else {
-                            "desabilitado"
+                            t("desabilitado", "disabled", "deshabilitado")
                         },
                     )
                 })
                 .collect();
             body.push_str(&format!(
-                r#"<h3>Repositórios</h3>
-<table><thead><tr><th>Nome</th><th>Estado</th><th></th></tr></thead><tbody>{rows}</tbody></table>"#
+                r#"<h3>{}</h3>
+<table><thead><tr><th>{}</th><th>{}</th><th></th></tr></thead><tbody>{rows}</tbody></table>"#,
+                t("Repositórios", "Repositories", "Repositorios"),
+                t("Nome", "Name", "Nombre"),
+                t("Estado", "State", "Estado"),
             ));
         }
-        Err(error) => body.push_str(&error_body("Lista de repositórios indisponível", error)),
+        Err(error) => body.push_str(&error_body(
+            lang,
+            t(
+                "Lista de repositórios indisponível",
+                "Repository list unavailable",
+                "Lista de repositorios no disponible",
+            ),
+            error,
+        )),
     }
     render_with("Software", "/software", &user, &subtitle, &header, body)
 }
@@ -116,21 +183,32 @@ fn package_table(
     actions: &Actions,
     allow_install: bool,
 ) -> String {
+    let lang = actions.lang;
+    let t = move |pt: &'static str, en: &'static str, es: &'static str| lang.text(pt, en, es);
     if packages.is_empty() {
-        return format!(r#"<h3>{title}</h3><p class="empty">Nada aqui.</p>"#);
+        return format!(
+            r#"<h3>{title}</h3><p class="empty">{}</p>"#,
+            t("Nada aqui.", "Nothing here.", "Nada aquí.")
+        );
     }
     let rows: String = packages
         .iter()
         .map(|package| {
             let status = if package.installed {
-                r#"<span class="badge on">instalado</span>"#
+                format!(
+                    r#"<span class="badge on">{}</span>"#,
+                    t("instalado", "installed", "instalado")
+                )
             } else {
-                r#"<span class="badge">disponível</span>"#
+                format!(
+                    r#"<span class="badge">{}</span>"#,
+                    t("disponível", "available", "disponible")
+                )
             };
             let action = if package.installed {
-                actions.button("Remover", "remove", &[("package", &package.name)])
+                actions.button(t("Remover", "Remove", "Quitar"), "remove", &[("package", &package.name)])
             } else if allow_install {
-                actions.button("Instalar", "install", &[("package", &package.name)])
+                actions.button(t("Instalar", "Install", "Instalar"), "install", &[("package", &package.name)])
             } else {
                 String::new()
             };
@@ -144,6 +222,9 @@ fn package_table(
         .collect();
     format!(
         r#"<h3>{title}</h3>
-<table><thead><tr><th>Pacote</th><th>Repositório</th><th>Estado</th><th></th></tr></thead><tbody>{rows}</tbody></table>"#
+<table><thead><tr><th>{}</th><th>{}</th><th>{}</th><th></th></tr></thead><tbody>{rows}</tbody></table>"#,
+        t("Pacote", "Package", "Paquete"),
+        t("Repositório", "Repository", "Repositorio"),
+        t("Estado", "State", "Estado"),
     )
 }

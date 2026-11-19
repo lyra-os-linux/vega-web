@@ -12,6 +12,8 @@ pub async fn handler(
     State(state): State<AppState>,
     Extension(user): Extension<CurrentUser>,
 ) -> Html<String> {
+    let lang = user.lang;
+    let t = move |pt: &'static str, en: &'static str, es: &'static str| lang.text(pt, en, es);
     let client = state.dbus.monitor();
     let mut body = String::new();
 
@@ -36,7 +38,11 @@ pub async fn handler(
                     metrics.gpu_percent,
                 )
             } else {
-                icon_stat("gpu", "GPU", "Uso indisponível")
+                icon_stat(
+                    "gpu",
+                    "GPU",
+                    t("Uso indisponível", "Usage unavailable", "Uso no disponible"),
+                )
             };
             let swap_tile = if metrics.swap_total > 0 {
                 gauge_stat(
@@ -50,7 +56,15 @@ pub async fn handler(
                     swap_percent,
                 )
             } else {
-                icon_stat("swap", "Swap", "Sem swap configurado")
+                icon_stat(
+                    "swap",
+                    "Swap",
+                    t(
+                        "Sem swap configurado",
+                        "No swap configured",
+                        "Sin swap configurado",
+                    ),
+                )
             };
 
             body.push_str(&format!(
@@ -67,7 +81,7 @@ pub async fn handler(
                 gpu = gpu_tile,
                 mem = gauge_stat(
                     "memory",
-                    "Memória",
+                    t("Memória", "Memory", "Memoria"),
                     &format!(
                         "{} / {}",
                         format_bytes(metrics.mem_used),
@@ -78,27 +92,35 @@ pub async fn handler(
                 swap = swap_tile,
                 disk_read = icon_stat(
                     "disk",
-                    "Disco (leitura)",
+                    t("Disco (leitura)", "Disk (read)", "Disco (lectura)"),
                     &format!("{}/s", format_bytes(metrics.disk_read_bytes))
                 ),
                 disk_write = icon_stat(
                     "disk",
-                    "Disco (escrita)",
+                    t("Disco (escrita)", "Disk (write)", "Disco (escritura)"),
                     &format!("{}/s", format_bytes(metrics.disk_write_bytes))
                 ),
                 net_rx = icon_stat(
                     "download",
-                    "Rede (rx)",
+                    t("Rede (rx)", "Network (rx)", "Red (rx)"),
                     &format!("{}/s", format_bytes(metrics.net_rx_bytes))
                 ),
                 net_tx = icon_stat(
                     "upload",
-                    "Rede (tx)",
+                    t("Rede (tx)", "Network (tx)", "Red (tx)"),
                     &format!("{}/s", format_bytes(metrics.net_tx_bytes))
                 ),
             ));
         }
-        Err(error) => body.push_str(&error_body("Métricas do sistema indisponíveis", error)),
+        Err(error) => body.push_str(&error_body(
+            lang,
+            t(
+                "Métricas do sistema indisponíveis",
+                "System metrics unavailable",
+                "Métricas del sistema no disponibles",
+            ),
+            error,
+        )),
     }
 
     match client.list_processes().await {
@@ -120,11 +142,27 @@ pub async fn handler(
                 })
                 .collect();
             body.push_str(&format!(
-                r#"<h3>Processos (top 20 por CPU)</h3>
-<table><thead><tr><th>PID</th><th>Nome</th><th>Usuário</th><th>CPU</th><th>Memória</th></tr></thead><tbody>{rows}</tbody></table>"#
+                r#"<h3>{}</h3>
+<table><thead><tr><th>PID</th><th>{}</th><th>{}</th><th>CPU</th><th>{}</th></tr></thead><tbody>{rows}</tbody></table>"#,
+                t(
+                    "Processos (top 20 por CPU)",
+                    "Processes (top 20 by CPU)",
+                    "Procesos (top 20 por CPU)",
+                ),
+                t("Nome", "Name", "Nombre"),
+                t("Usuário", "User", "Usuario"),
+                t("Memória", "Memory", "Memoria"),
             ));
         }
-        Err(error) => body.push_str(&error_body("Lista de processos indisponível", error)),
+        Err(error) => body.push_str(&error_body(
+            lang,
+            t(
+                "Lista de processos indisponível",
+                "Process list unavailable",
+                "Lista de procesos no disponible",
+            ),
+            error,
+        )),
     }
 
     render("Monitor", "/monitor", &user, body)

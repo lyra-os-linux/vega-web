@@ -23,6 +23,8 @@ pub async fn handler(
     Extension(user): Extension<CurrentUser>,
     Query(query): Query<ServicesQuery>,
 ) -> Html<String> {
+    let lang = user.lang;
+    let t = move |pt: &'static str, en: &'static str, es: &'static str| lang.text(pt, en, es);
     let actions = Actions::new(&state, &jar, &user);
     let client = state.dbus.services();
     let result = if query.all {
@@ -52,29 +54,29 @@ pub async fn handler(
                     let buttons = if actions.enabled() && service.available {
                         format!(
                             r#"<div class="row-actions">{}{}{}</div>"#,
-                            actions.button("Reiniciar", "service-restart", &[("name", &service.name)]),
+                            actions.button(t("Reiniciar", "Restart", "Reiniciar"), "service-restart", &[("name", &service.name)]),
                             if service.active {
                                 actions.button(
-                                    "Parar",
+                                    t("Parar", "Stop", "Detener"),
                                     "service-running",
                                     &[("name", &service.name), ("enabled", "false")],
                                 )
                             } else {
                                 actions.button(
-                                    "Iniciar",
+                                    t("Iniciar", "Start", "Iniciar"),
                                     "service-running",
                                     &[("name", &service.name), ("enabled", "true")],
                                 )
                             },
                             if service.enabled {
                                 actions.button(
-                                    "Desabilitar",
+                                    t("Desabilitar", "Disable", "Deshabilitar"),
                                     "service-enabled",
                                     &[("name", &service.name), ("enabled", "false")],
                                 )
                             } else {
                                 actions.button(
-                                    "Habilitar",
+                                    t("Habilitar", "Enable", "Habilitar"),
                                     "service-enabled",
                                     &[("name", &service.name), ("enabled", "true")],
                                 )
@@ -95,57 +97,105 @@ pub async fn handler(
                         html_escape(&service.description),
                         if service.enabled { "on" } else { "off" },
                         if service.enabled {
-                            "habilitado"
+                            t("habilitado", "enabled", "habilitado")
                         } else {
-                            "desabilitado"
+                            t("desabilitado", "disabled", "deshabilitado")
                         },
                         if service.active { "on" } else { "off" },
-                        if service.active { "ativo" } else { "inativo" },
+                        if service.active {
+                            t("ativo", "active", "activo")
+                        } else {
+                            t("inativo", "inactive", "inactivo")
+                        },
                     )
                 })
                 .collect();
             let table = if shown.is_empty() {
-                r#"<p class="empty">Nenhum serviço corresponde à busca.</p>"#.to_owned()
+                format!(
+                    r#"<p class="empty">{}</p>"#,
+                    t(
+                        "Nenhum serviço corresponde à busca.",
+                        "No service matches the search.",
+                        "Ningún servicio coincide con la búsqueda.",
+                    )
+                )
             } else {
                 format!(
                     r#"<table>
-<thead><tr><th>Serviço</th><th>Inicialização</th><th>Estado</th><th></th></tr></thead>
+<thead><tr><th>{}</th><th>{}</th><th>{}</th><th></th></tr></thead>
 <tbody>{rows}</tbody>
-</table>"#
+</table>"#,
+                    t("Serviço", "Service", "Servicio"),
+                    t("Inicialização", "Startup", "Inicio"),
+                    t("Estado", "State", "Estado"),
                 )
             };
             let foot = if actions.enabled() {
-                r#"<p class="tile-foot">Cada ação pede sua senha e é executada com a sua identidade; o resultado fica registrado na atividade e no journal.</p>"#
+                format!(
+                    r#"<p class="tile-foot">{}</p>"#,
+                    t(
+                        "Cada ação pede sua senha e é executada com a sua identidade; o resultado fica registrado na atividade e no journal.",
+                        "Each action asks for your password and runs with your identity; the result is recorded in the activity log and in the journal.",
+                        "Cada acción pide su contraseña y se ejecuta con su identidad; el resultado queda registrado en la actividad y en el journal.",
+                    )
+                )
             } else {
-                ""
+                String::new()
             };
             (
                 format!(
-                    "{total} serviço(s) {} · {active} ativos · {enabled} habilitados na inicialização",
-                    if query.all { "no total" } else { "principais" }
+                    "{total} {} {} · {active} {} · {enabled} {}",
+                    t("serviço(s)", "service(s)", "servicio(s)"),
+                    if query.all {
+                        t("no total", "in total", "en total")
+                    } else {
+                        t("principais", "main", "principales")
+                    },
+                    t("ativos", "active", "activos"),
+                    t(
+                        "habilitados na inicialização",
+                        "enabled at startup",
+                        "habilitados al inicio",
+                    ),
                 ),
                 format!("{}{table}{foot}", actions.notice()),
             )
         }
         Err(error) => (
             String::new(),
-            error_body("Lista de serviços indisponível", error),
+            error_body(
+                lang,
+                t(
+                    "Lista de serviços indisponível",
+                    "Service list unavailable",
+                    "Lista de servicios no disponible",
+                ),
+                error,
+            ),
         ),
     };
     let header = format!(
-        r#"<form method="get" action="/servicos"><input type="hidden" name="all" value="{all}"><input type="search" name="q" value="{q}" placeholder="Buscar serviço" aria-label="Buscar serviço"></form><a class="button" href="{href}">{label}</a>"#,
+        r#"<form method="get" action="/servicos"><input type="hidden" name="all" value="{all}"><input type="search" name="q" value="{q}" placeholder="{search}" aria-label="{search}"></form><a class="button" href="{href}">{label}</a>"#,
         all = query.all,
         q = html_escape(&query.q),
+        search = t("Buscar serviço", "Search service", "Buscar servicio"),
         href = if query.all {
             "/servicos"
         } else {
             "/servicos?all=true"
         },
         label = if query.all {
-            "Ver principais"
+            t("Ver principais", "Show main", "Ver principales")
         } else {
-            "Ver todos"
+            t("Ver todos", "Show all", "Ver todos")
         },
     );
-    render_with("Serviços", "/servicos", &user, &subtitle, &header, body)
+    render_with(
+        t("Serviços", "Services", "Servicios"),
+        "/servicos",
+        &user,
+        &subtitle,
+        &header,
+        body,
+    )
 }

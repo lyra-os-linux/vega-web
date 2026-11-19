@@ -87,14 +87,47 @@ impl ReadQuery {
     }
 
     pub fn describe(self) -> &'static str {
+        self.describe_in(crate::lang::Lang::Pt)
+    }
+
+    pub fn describe_in(self, lang: crate::lang::Lang) -> &'static str {
+        let t = |pt: &'static str, en: &'static str, es: &'static str| lang.text(pt, en, es);
         match self {
-            Self::KernelBoot => "Ler o status de boot e as entradas do carregador",
-            Self::BackupConfigs => "Ler as configurações de backup",
-            Self::Snapshots => "Ler a lista de snapshots",
-            Self::LogUnits => "Ler a lista de unidades do journal",
-            Self::Firewall => "Ler os serviços e as portas do firewall",
-            Self::LastPeriodic => "Ler o resultado da última verificação periódica",
-            Self::CleanupScan => "Medir o espaço que pode ser liberado",
+            Self::KernelBoot => t(
+                "Ler o status de boot e as entradas do carregador",
+                "Read the boot status and the boot loader entries",
+                "Leer el estado de arranque y las entradas del cargador",
+            ),
+            Self::BackupConfigs => t(
+                "Ler as configurações de backup",
+                "Read the backup configurations",
+                "Leer las configuraciones de copia de seguridad",
+            ),
+            Self::Snapshots => t(
+                "Ler a lista de snapshots",
+                "Read the snapshot list",
+                "Leer la lista de instantáneas",
+            ),
+            Self::LogUnits => t(
+                "Ler a lista de unidades do journal",
+                "Read the journal unit list",
+                "Leer la lista de unidades del journal",
+            ),
+            Self::Firewall => t(
+                "Ler os serviços e as portas do firewall",
+                "Read the firewall services and ports",
+                "Leer los servicios y los puertos del firewall",
+            ),
+            Self::LastPeriodic => t(
+                "Ler o resultado da última verificação periódica",
+                "Read the result of the last periodic check",
+                "Leer el resultado de la última comprobación periódica",
+            ),
+            Self::CleanupScan => t(
+                "Medir o espaço que pode ser liberado",
+                "Measure the space that can be freed",
+                "Medir el espacio que se puede liberar",
+            ),
         }
     }
 }

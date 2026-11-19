@@ -13,6 +13,8 @@ pub async fn handler(
     jar: PrivateCookieJar,
     Extension(user): Extension<CurrentUser>,
 ) -> Html<String> {
+    let lang = user.lang;
+    let t = move |pt: &'static str, en: &'static str, es: &'static str| lang.text(pt, en, es);
     let actions = Actions::new(&state, &jar, &user);
     let (subtitle, body) = match state.dbus.users().list().await {
         Ok(mut users) => {
@@ -28,13 +30,13 @@ pub async fn handler(
                         String::new()
                     } else if account.is_admin {
                         actions.button(
-                            "Retirar administrador",
+                            t("Retirar administrador", "Remove administrator", "Quitar administrador"),
                             "set-admin",
                             &[("name", &account.username), ("enabled", "false")],
                         )
                     } else {
                         actions.button(
-                            "Tornar administrador",
+                            t("Tornar administrador", "Make administrator", "Hacer administrador"),
                             "set-admin",
                             &[("name", &account.username), ("enabled", "true")],
                         )
@@ -45,7 +47,11 @@ pub async fn handler(
                         html_escape(&account.full_name),
                         html_escape(&account.groups.join(", ")),
                         if account.is_admin {
-                            r#"<span class="badge on">administrador</span>"#
+                            match lang {
+                            vega_web::lang::Lang::Pt => r#"<span class="badge on">administrador</span>"#,
+                            vega_web::lang::Lang::En => r#"<span class="badge on">administrator</span>"#,
+                            vega_web::lang::Lang::Es => r#"<span class="badge on">administrador</span>"#,
+                        }
                         } else {
                             ""
                         },
@@ -53,20 +59,42 @@ pub async fn handler(
                 })
                 .collect();
             (
-                format!("{} conta(s) · {admins} administrador(es)", users.len()),
+                format!(
+                    "{} {} · {admins} {}",
+                    users.len(),
+                    t("conta(s)", "account(s)", "cuenta(s)"),
+                    t("administrador(es)", "administrator(s)", "administrador(es)"),
+                ),
                 format!(
                     r#"{}<table>
-<thead><tr><th>Usuário</th><th>Grupos</th><th></th><th></th></tr></thead>
+<thead><tr><th>{}</th><th>{}</th><th></th><th></th></tr></thead>
 <tbody>{rows}</tbody>
 </table>"#,
-                    actions.notice()
+                    actions.notice(),
+                    t("Usuário", "User", "Usuario"),
+                    t("Grupos", "Groups", "Grupos"),
                 ),
             )
         }
         Err(error) => (
             String::new(),
-            error_body("Lista de usuários indisponível", error),
+            error_body(
+                lang,
+                t(
+                    "Lista de usuários indisponível",
+                    "User list unavailable",
+                    "Lista de usuarios no disponible",
+                ),
+                error,
+            ),
         ),
     };
-    render_with("Usuários", "/usuarios", &user, &subtitle, "", body)
+    render_with(
+        t("Usuários", "Users", "Usuarios"),
+        "/usuarios",
+        &user,
+        &subtitle,
+        "",
+        body,
+    )
 }

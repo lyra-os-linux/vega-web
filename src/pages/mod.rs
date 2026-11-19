@@ -19,6 +19,21 @@ use crate::layout;
 
 pub(crate) const ADMINISTRATION_UNAVAILABLE_NOTICE: &str = r#"<p class="notice">As alterações pelo painel estão desativadas nesta instalação: o broker administrativo (vega-web-admin.socket) não está configurado. Use o Vega na sessão local ou pelo terminal.</p>"#;
 
+/// The notice above, in the session's language.
+pub(crate) fn unavailable_notice(lang: vega_web::lang::Lang) -> String {
+    match lang {
+        vega_web::lang::Lang::Pt => ADMINISTRATION_UNAVAILABLE_NOTICE.to_owned(),
+        _ => format!(
+            r#"<p class="notice">{}</p>"#,
+            lang.text(
+                "",
+                "Changes from the panel are disabled on this installation: the administrative broker (vega-web-admin.socket) is not configured. Use Vega in the local session or from the terminal.",
+                "Los cambios desde el panel están desactivados en esta instalación: el broker administrativo (vega-web-admin.socket) no está configurado. Use Vega en la sesión local o desde la terminal.",
+            )
+        ),
+    }
+}
+
 /// Authentication alone cannot authorize writes through the service account's
 /// D-Bus connection. Keep old POST URLs fail-closed until a per-user backend exists.
 pub(crate) async fn administration_unavailable(
@@ -33,17 +48,26 @@ pub(crate) async fn administration_unavailable(
     (
         axum::http::StatusCode::FORBIDDEN,
         render(
-            "Ação indisponível",
+            user.lang.text(
+                "Ação indisponível",
+                "Action unavailable",
+                "Acción no disponible",
+            ),
             uri.path(),
             &user,
-            ADMINISTRATION_UNAVAILABLE_NOTICE.to_string(),
+            unavailable_notice(user.lang),
         ),
     )
 }
 
 /// A failed query, in human terms. The raw daemon error stays available in a
 /// collapsed detail block instead of being the message itself.
-pub(crate) fn error_body(context: &str, detail: impl std::fmt::Display) -> String {
+pub(crate) fn error_body(
+    lang: vega_web::lang::Lang,
+    context: &str,
+    detail: impl std::fmt::Display,
+) -> String {
+    let t = |pt: &'static str, en: &'static str, es: &'static str| lang.text(pt, en, es);
     let raw = detail.to_string();
     let lower = raw.to_lowercase();
     let (level, explanation) = if lower.contains("authorizationfailed")
@@ -52,30 +76,65 @@ pub(crate) fn error_body(context: &str, detail: impl std::fmt::Display) -> Strin
     {
         (
             "warn",
-            "Esta consulta exige autorização de administrador, que o painel ainda não repassa para leituras. Use o console (vega) ou o terminal web.",
+            t(
+                "Esta consulta exige autorização de administrador, que o painel ainda não repassa para leituras. Use o console (vega) ou o terminal web.",
+                "This query requires administrator authorization, which the panel does not yet pass on for reads. Use the console (vega) or the web terminal.",
+                "Esta consulta requiere autorización de administrador, que el panel todavía no transmite para lecturas. Use la consola (vega) o la terminal web.",
+            ),
         )
     } else if lower.contains("capabilityunavailable") || lower.contains("not supported") {
-        ("info", "Recurso não disponível nesta edição.")
+        (
+            "info",
+            t(
+                "Recurso não disponível nesta edição.",
+                "Feature not available in this edition.",
+                "Función no disponible en esta edición.",
+            ),
+        )
     } else if lower.contains("snapper") {
         (
             "info",
-            "Snapshots exigem Btrfs com Snapper; esta instalação usa outro sistema de arquivos.",
+            t(
+                "Snapshots exigem Btrfs com Snapper; esta instalação usa outro sistema de arquivos.",
+                "Snapshots require Btrfs with Snapper; this installation uses another file system.",
+                "Las instantáneas requieren Btrfs con Snapper; esta instalación usa otro sistema de archivos.",
+            ),
         )
     } else if lower.contains("not activatable") || lower.contains("was not provided by any") {
         (
             "error",
-            "O serviço vegad não está disponível. Verifique se vegad.service está instalado e ativo.",
+            t(
+                "O serviço vegad não está disponível. Verifique se vegad.service está instalado e ativo.",
+                "The vegad service is not available. Check that vegad.service is installed and active.",
+                "El servicio vegad no está disponible. Compruebe que vegad.service esté instalado y activo.",
+            ),
         )
     } else if lower.contains("timed out") || lower.contains("did not receive a reply") {
         (
             "warn",
-            "O vegad não respondeu a tempo. Tente de novo em instantes.",
+            t(
+                "O vegad não respondeu a tempo. Tente de novo em instantes.",
+                "vegad did not answer in time. Try again in a moment.",
+                "vegad no respondió a tiempo. Inténtelo de nuevo en unos instantes.",
+            ),
         )
     } else {
-        ("error", "A consulta falhou.")
+        (
+            "error",
+            t(
+                "A consulta falhou.",
+                "The query failed.",
+                "La consulta falló.",
+            ),
+        )
     };
     format!(
-        r#"<div class="notice {level}"><strong>{context}</strong><span>{explanation}</span><details><summary>Detalhes técnicos</summary><code>{}</code></details></div>"#,
+        r#"<div class="notice {level}"><strong>{context}</strong><span>{explanation}</span><details><summary>{}</summary><code>{}</code></details></div>"#,
+        t(
+            "Detalhes técnicos",
+            "Technical details",
+            "Detalles técnicos"
+        ),
         html_escape(&raw)
     )
 }
@@ -167,17 +226,8 @@ impl Actions {
     pub(crate) fn notice(&self) -> String {
         if self.enabled() {
             String::new()
-        } else if self.lang == vega_web::lang::Lang::Pt {
-            ADMINISTRATION_UNAVAILABLE_NOTICE.to_owned()
         } else {
-            format!(
-                r#"<p class="notice">{}</p>"#,
-                self.lang.text(
-                    "",
-                    "Changes from the panel are disabled on this installation: the administrative broker (vega-web-admin.socket) is not configured. Use Vega in the local session or from the terminal.",
-                    "Los cambios desde el panel están desactivados en esta instalación: el broker administrativo (vega-web-admin.socket) no está configurado. Use Vega en la sesión local o desde la terminal.",
-                )
-            )
+            unavailable_notice(self.lang)
         }
     }
 }
@@ -267,4 +317,29 @@ pub(crate) fn html_escape(input: &str) -> String {
         .replace('>', "&gt;")
         .replace('"', "&quot;")
         .replace('\'', "&#39;")
+}
+
+#[cfg(test)]
+mod tests {
+    use vega_web::lang::Lang;
+
+    #[test]
+    fn error_body_follows_the_session_language() {
+        let english = super::error_body(Lang::En, "Users", "timed out");
+        assert!(english.contains("vegad did not answer in time"));
+        assert!(english.contains("Technical details"));
+        let spanish = super::error_body(Lang::Es, "Usuarios", "boom");
+        assert!(spanish.contains("La consulta falló."));
+        let portuguese = super::error_body(Lang::Pt, "Usuários", "boom");
+        assert!(portuguese.contains("A consulta falhou."));
+    }
+
+    #[test]
+    fn unavailable_notice_keeps_the_portuguese_constant() {
+        assert_eq!(
+            super::unavailable_notice(Lang::Pt),
+            super::ADMINISTRATION_UNAVAILABLE_NOTICE
+        );
+        assert!(super::unavailable_notice(Lang::En).contains("administrative broker"));
+    }
 }

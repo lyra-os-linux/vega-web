@@ -14,6 +14,8 @@ pub async fn handler(
     jar: PrivateCookieJar,
     Extension(user): Extension<CurrentUser>,
 ) -> Html<String> {
+    let lang = user.lang;
+    let t = move |pt: &'static str, en: &'static str, es: &'static str| lang.text(pt, en, es);
     let mut body = match state.dbus.storage().list().await {
         Ok(volumes) => {
             let rows: String = volumes
@@ -34,14 +36,31 @@ pub async fn handler(
                 .collect();
             format!(
                 r#"<table>
-<thead><tr><th>Volume</th><th>Sistema de arquivos</th><th>Uso</th><th>Ponto de montagem</th></tr></thead>
+<thead><tr><th>{}</th><th>{}</th><th>{}</th><th>{}</th></tr></thead>
 <tbody>{rows}</tbody>
-</table>"#
+</table>"#,
+                t("Volume", "Volume", "Volumen"),
+                t("Sistema de arquivos", "File system", "Sistema de archivos"),
+                t("Uso", "Usage", "Uso"),
+                t("Ponto de montagem", "Mount point", "Punto de montaje"),
             )
         }
-        Err(error) => error_body("Lista de volumes indisponível", error),
+        Err(error) => error_body(
+            lang,
+            t(
+                "Lista de volumes indisponível",
+                "Volume list unavailable",
+                "Lista de volúmenes no disponible",
+            ),
+            error,
+        ),
     };
     body.push_str(&super::diagnostics::cleanup_section(&state, &jar, &user));
 
-    render("Armazenamento", "/armazenamento", &user, body)
+    render(
+        t("Armazenamento", "Storage", "Almacenamiento"),
+        "/armazenamento",
+        &user,
+        body,
+    )
 }
