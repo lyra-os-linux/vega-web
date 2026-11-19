@@ -19,14 +19,16 @@ pub async fn handler(
     Extension(user): Extension<CurrentUser>,
 ) -> Response {
     let username = user.name.clone();
+    let lang = user.lang;
+    let t = move |pt: &'static str, en: &'static str, es: &'static str| lang.text(pt, en, es);
     if state.admin_socket.is_none() {
         return (
             StatusCode::FORBIDDEN,
             render(
-                "Administração",
+                t("Administração", "Administration", "Administración"),
                 "/software",
                 &user,
-                super::ADMINISTRATION_UNAVAILABLE_NOTICE.to_owned(),
+                super::unavailable_notice(lang),
             ),
         )
             .into_response();
@@ -42,23 +44,64 @@ pub async fn handler(
     }
     let csrf = html_escape(&lease.csrf);
     let body = format!(
-        r#"<p>As alterações exigem uma conta administrativa do grupo <code>wheel</code>. Confirme a operação informando sua senha novamente.</p>
-<h3>Instalar pacote RPM</h3>
+        r#"<p>{intro}</p>
+<h3>{install_title}</h3>
 <form method="post" action="/administracao">
 <input type="hidden" name="action" value="install"><input type="hidden" name="csrf" value="{csrf}">
-<label>Nome do pacote<br><input name="package" required maxlength="200" autocomplete="off"></label>
-<label>Senha<br><input type="password" name="password" required autocomplete="current-password" maxlength="4096"></label>
-<button type="submit">Autorizar instalação</button></form>
-<h3>Abrir uma porta no firewall</h3>
+<label>{package}<br><input name="package" required maxlength="200" autocomplete="off"></label>
+<label>{password}<br><input type="password" name="password" required autocomplete="current-password" maxlength="4096"></label>
+<button type="submit">{install}</button></form>
+<h3>{port_title}</h3>
 <form method="post" action="/administracao">
 <input type="hidden" name="action" value="add-port"><input type="hidden" name="csrf" value="{csrf}">
-<label>Porta<br><input type="number" name="port" min="1" max="65535" required></label>
-<label>Protocolo<br><select name="protocol"><option value="tcp">TCP</option><option value="udp">UDP</option></select></label>
-<label>Senha<br><input type="password" name="password" required autocomplete="current-password" maxlength="4096"></label>
-<button type="submit">Autorizar abertura da porta</button></form>
-<p><a href="/software">Voltar para Software</a> · <a href="/rede">Voltar para Rede</a></p>"#
+<label>{port}<br><input type="number" name="port" min="1" max="65535" required></label>
+<label>{protocol}<br><select name="protocol"><option value="tcp">TCP</option><option value="udp">UDP</option></select></label>
+<label>{password}<br><input type="password" name="password" required autocomplete="current-password" maxlength="4096"></label>
+<button type="submit">{open_port}</button></form>
+<p><a href="/software">{back_software}</a> · <a href="/rede">{back_network}</a></p>"#,
+        intro = t(
+            "As alterações exigem uma conta administrativa do grupo <code>wheel</code>. Confirme a operação informando sua senha novamente.",
+            "Changes require an administrative account in the <code>wheel</code> group. Confirm the operation by entering your password again.",
+            "Los cambios requieren una cuenta administrativa del grupo <code>wheel</code>. Confirme la operación introduciendo de nuevo su contraseña.",
+        ),
+        install_title = t(
+            "Instalar pacote RPM",
+            "Install RPM package",
+            "Instalar paquete RPM"
+        ),
+        package = t("Nome do pacote", "Package name", "Nombre del paquete"),
+        password = t("Senha", "Password", "Contraseña"),
+        install = t(
+            "Autorizar instalação",
+            "Authorize installation",
+            "Autorizar instalación"
+        ),
+        port_title = t(
+            "Abrir uma porta no firewall",
+            "Open a port in the firewall",
+            "Abrir un puerto en el firewall",
+        ),
+        port = t("Porta", "Port", "Puerto"),
+        protocol = t("Protocolo", "Protocol", "Protocolo"),
+        open_port = t(
+            "Autorizar abertura da porta",
+            "Authorize opening the port",
+            "Autorizar la apertura del puerto",
+        ),
+        back_software = t(
+            "Voltar para Software",
+            "Back to Software",
+            "Volver a Software"
+        ),
+        back_network = t("Voltar para Rede", "Back to Network", "Volver a Red"),
     );
-    render("Administração", "/software", &user, body).into_response()
+    render(
+        t("Administração", "Administration", "Administración"),
+        "/software",
+        &user,
+        body,
+    )
+    .into_response()
 }
 
 #[derive(Deserialize)]
@@ -243,14 +286,20 @@ pub async fn confirm(
     Form(form): Form<ActionForm>,
 ) -> Response {
     let username = user.name.clone();
+    let lang = user.lang;
+    let t = move |pt: &'static str, en: &'static str, es: &'static str| lang.text(pt, en, es);
     if state.admin_socket.is_none() {
         return (
             StatusCode::FORBIDDEN,
             render(
-                "Ação indisponível",
+                t(
+                    "Ação indisponível",
+                    "Action unavailable",
+                    "Acción no disponible",
+                ),
                 "/",
                 &user,
-                super::ADMINISTRATION_UNAVAILABLE_NOTICE.to_owned(),
+                super::unavailable_notice(lang),
             ),
         )
             .into_response();
@@ -262,35 +311,71 @@ pub async fn confirm(
         return Redirect::to("/login").into_response();
     };
     if lease.username != username || !matching_csrf(&lease.csrf, &form.csrf) {
-        return (StatusCode::FORBIDDEN, "Confirmação de sessão inválida.").into_response();
+        return (StatusCode::FORBIDDEN, invalid_session(lang)).into_response();
     }
     let Some(operation) = form.operation() else {
-        return (StatusCode::BAD_REQUEST, "Operação ou parâmetros inválidos.").into_response();
+        return (StatusCode::BAD_REQUEST, invalid_operation(lang)).into_response();
     };
     let body = format!(
         r#"<div class="dialog">
 <div class="dialog-icon">{icon}</div>
 <div>
 <h2>{title}</h2>
-<p class="dialog-summary">A operação é executada com a sua identidade e registrada no journal. Confirme com sua senha.</p>
+<p class="dialog-summary">{summary}</p>
 </div>
 <form method="post" action="/administracao">
 {hidden}<input type="hidden" name="csrf" value="{csrf}">
-<div class="field"><label for="password">Sua senha</label>
+<div class="field"><label for="password">{your_password}</label>
 <div class="field-input"><input id="password" type="password" name="password" autocomplete="current-password" autofocus required maxlength="4096"></div></div>
-<p class="dialog-meta">Autorização polkit <code>{action}</code> · executa como {username}</p>
-<div class="dialog-actions"><a class="button-link" href="{back}">Cancelar</a><button type="submit">Confirmar</button></div>
+<p class="dialog-meta">{polkit} <code>{action}</code> · {runs_as} {username}</p>
+<div class="dialog-actions"><a class="button-link" href="{back}">{cancel}</a><button type="submit">{confirm}</button></div>
 </form>
 </div>"#,
         icon = super::widgets::icon("firewall"),
-        title = html_escape(&operation.describe()),
+        title = html_escape(&operation.describe_in(lang)),
+        summary = t(
+            "A operação é executada com a sua identidade e registrada no journal. Confirme com sua senha.",
+            "The operation runs with your identity and is recorded in the journal. Confirm with your password.",
+            "La operación se ejecuta con su identidad y queda registrada en el journal. Confirme con su contraseña.",
+        ),
+        your_password = t("Sua senha", "Your password", "Su contraseña"),
+        polkit = t(
+            "Autorização polkit",
+            "polkit authorization",
+            "Autorización polkit"
+        ),
+        runs_as = t("executa como", "runs as", "se ejecuta como"),
+        cancel = t("Cancelar", "Cancel", "Cancelar"),
+        confirm = t("Confirmar", "Confirm", "Confirmar"),
         hidden = form.hidden_fields(),
         csrf = html_escape(&lease.csrf),
         action = operation.action_id(),
         username = html_escape(&username),
         back = operation.return_href(),
     );
-    render("Confirmar ação", operation.return_href(), &user, body).into_response()
+    render(
+        t("Confirmar ação", "Confirm action", "Confirmar acción"),
+        operation.return_href(),
+        &user,
+        body,
+    )
+    .into_response()
+}
+
+fn invalid_session(lang: vega_web::lang::Lang) -> &'static str {
+    lang.text(
+        "Confirmação de sessão inválida.",
+        "Invalid session confirmation.",
+        "Confirmación de sesión no válida.",
+    )
+}
+
+fn invalid_operation(lang: vega_web::lang::Lang) -> &'static str {
+    lang.text(
+        "Operação ou parâmetros inválidos.",
+        "Invalid operation or parameters.",
+        "Operación o parámetros no válidos.",
+    )
 }
 
 pub(crate) fn matching_csrf(expected: &str, received: &str) -> bool {
@@ -310,28 +395,50 @@ pub async fn execute(
     Form(mut form): Form<ActionForm>,
 ) -> Response {
     let username = user.name.clone();
+    let lang = user.lang;
+    let t = move |pt: &'static str, en: &'static str, es: &'static str| lang.text(pt, en, es);
     // Move the secret out before validation so every early return clears it.
     let password = Zeroizing::new(std::mem::take(&mut form.password).unwrap_or_default());
     let Some(path) = state.admin_socket.as_deref() else {
-        return (StatusCode::FORBIDDEN, "Administração indisponível.").into_response();
+        return (
+            StatusCode::FORBIDDEN,
+            t(
+                "Administração indisponível.",
+                "Administration unavailable.",
+                "Administración no disponible.",
+            ),
+        )
+            .into_response();
     };
     let Some(mut lease) = jar
         .get(SESSION_COOKIE)
         .and_then(|cookie| state.sessions.lease(cookie.value(), Instant::now()))
     else {
-        return (StatusCode::UNAUTHORIZED, "Sessão encerrada.").into_response();
+        return (
+            StatusCode::UNAUTHORIZED,
+            t("Sessão encerrada.", "Session closed.", "Sesión cerrada."),
+        )
+            .into_response();
     };
     if lease.username != username || !matching_csrf(&lease.csrf, &form.csrf) {
-        return (StatusCode::FORBIDDEN, "Confirmação de sessão inválida.").into_response();
+        return (StatusCode::FORBIDDEN, invalid_session(lang)).into_response();
     }
     let Some(operation) = form.operation() else {
-        return (StatusCode::BAD_REQUEST, "Operação ou parâmetros inválidos.").into_response();
+        return (StatusCode::BAD_REQUEST, invalid_operation(lang)).into_response();
     };
     if password.is_empty()
         || password.len() > vega_web::auth_ipc::MAX_PASSWORD
         || password.contains('\0')
     {
-        return (StatusCode::BAD_REQUEST, "Senha necessária.").into_response();
+        return (
+            StatusCode::BAD_REQUEST,
+            t(
+                "Senha necessária.",
+                "Password required.",
+                "Contraseña necesaria.",
+            ),
+        )
+            .into_response();
     }
     let ip = remote.ip().to_string();
     if state
@@ -339,12 +446,24 @@ pub async fn execute(
         .check(&ip, &username, Instant::now())
         .is_some()
     {
-        return (StatusCode::TOO_MANY_REQUESTS, "Muitas tentativas; aguarde.").into_response();
+        return (
+            StatusCode::TOO_MANY_REQUESTS,
+            t(
+                "Muitas tentativas; aguarde.",
+                "Too many attempts; please wait.",
+                "Demasiados intentos; espere.",
+            ),
+        )
+            .into_response();
     }
     let Ok(_permit) = state.pam_slots.clone().try_acquire_owned() else {
         return (
             StatusCode::SERVICE_UNAVAILABLE,
-            "Autenticação ocupada; tente novamente.",
+            t(
+                "Autenticação ocupada; tente novamente.",
+                "Authentication busy; try again.",
+                "Autenticación ocupada; inténtelo de nuevo.",
+            ),
         )
             .into_response();
     };
@@ -355,13 +474,13 @@ pub async fn execute(
         operation: operation.clone(),
     };
     let pending_cleanup = if matches!(operation, Operation::CleanupClean(_)) {
-        match super::diagnostics::prepare_cleanup(&state, lease.admin_binding).await {
+        match super::diagnostics::prepare_cleanup(&state, lease.admin_binding, lang).await {
             Ok(pending) => Some(pending),
             Err(error) => {
                 return (
                     StatusCode::CONFLICT,
                     render(
-                        "Liberar espaço",
+                        t("Liberar espaço", "Free up space", "Liberar espacio"),
                         "/armazenamento",
                         &user,
                         format!(r#"<p class="notice warn">{}</p>"#, html_escape(&error)),
@@ -377,7 +496,11 @@ pub async fn execute(
         biased;
         _ = lease.revoked() => {
             eprintln!("vega-web: user={username:?} action={} outcome=session-revoked", operation.action_id());
-            return (StatusCode::UNAUTHORIZED, "Sessão encerrada. Entre novamente e confira o estado da operação antes de repetir.").into_response();
+            return (StatusCode::UNAUTHORIZED, t(
+                "Sessão encerrada. Entre novamente e confira o estado da operação antes de repetir.",
+                "Session closed. Sign in again and check the state of the operation before repeating it.",
+                "Sesión cerrada. Vuelva a entrar y compruebe el estado de la operación antes de repetirla.",
+            )).into_response();
         },
         result = admin_ipc::execute(Path::new(path), request) => result,
     };
@@ -416,25 +539,59 @@ pub async fn execute(
             }
             let (status, message) = match &operation {
                 Operation::InstallNative(name) => (StatusCode::ACCEPTED, format!(
-                    "Solicitação de instalação de <strong>{}</strong> aceita. Transação {}. A instalação ainda precisa concluir; confira o estado do pacote antes de repetir.", html_escape(name), result.transaction)),
+                    "{} <strong>{}</strong> {}. {} {}. {}",
+                    t("Solicitação de instalação de", "Installation request for", "Solicitud de instalación de"),
+                    html_escape(name),
+                    t("aceita", "accepted", "aceptada"),
+                    t("Transação", "Transaction", "Transacción"),
+                    result.transaction,
+                    t(
+                        "A instalação ainda precisa concluir; confira o estado do pacote antes de repetir.",
+                        "The installation still has to finish; check the package state before repeating it.",
+                        "La instalación todavía tiene que terminar; compruebe el estado del paquete antes de repetirla.",
+                    ))),
                 Operation::RemoveNative(name) => (StatusCode::ACCEPTED, format!(
-                    "Remoção de <strong>{}</strong> aceita. Transação {}.", html_escape(name), result.transaction)),
+                    "{} <strong>{}</strong> {}. {} {}.",
+                    t("Remoção de", "Removal of", "Eliminación de"),
+                    html_escape(name),
+                    t("aceita", "accepted", "aceptada"),
+                    t("Transação", "Transaction", "Transacción"),
+                    result.transaction)),
                 Operation::UpdateAllNative => (StatusCode::ACCEPTED, format!(
-                    "Aplicação das atualizações aceita. Transação {}. Acompanhe o estado em Software.", result.transaction)),
+                    "{} {} {}. {}",
+                    t("Aplicação das atualizações aceita.", "Update application accepted.", "Aplicación de las actualizaciones aceptada."),
+                    t("Transação", "Transaction", "Transacción"),
+                    result.transaction,
+                    t("Acompanhe o estado em Software.", "Follow the state in Software.", "Siga el estado en Software."))),
                 Operation::ClearNativeCache => (StatusCode::ACCEPTED, format!(
-                    "Limpeza do cache de pacotes aceita. Transação {}.", result.transaction)),
-                other => (StatusCode::OK, format!("{} concluído.", html_escape(&other.describe()))),
+                    "{} {} {}.",
+                    t("Limpeza do cache de pacotes aceita.", "Package cache cleanup accepted.", "Limpieza de la caché de paquetes aceptada."),
+                    t("Transação", "Transaction", "Transacción"),
+                    result.transaction)),
+                other => (StatusCode::OK, format!(
+                    "{}: {}.",
+                    html_escape(&other.describe_in(lang)),
+                    t("concluído", "done", "completado"))),
             };
             let back = operation.return_href();
-            (status, render("Ação concluída", back, &user,
-                format!(r#"<p class="notice success">{message}</p><p><a class="button-link" href="{back}">Voltar</a></p>"#))).into_response()
+            (status, render(t("Ação concluída", "Action completed", "Acción completada"), back, &user,
+                format!(r#"<p class="notice success">{message}</p><p><a class="button-link" href="{back}">{}</a></p>"#,
+                    t("Voltar", "Back", "Volver")))).into_response()
         }
         Err(error) if error.kind() == std::io::ErrorKind::PermissionDenied => {
             let delay = state.login_limiter.failure(&ip, &username, Instant::now());
             tokio::time::sleep(delay).await;
-            (StatusCode::FORBIDDEN, "Operação não autorizada. Verifique suas credenciais e permissões.").into_response()
+            (StatusCode::FORBIDDEN, t(
+                "Operação não autorizada. Verifique suas credenciais e permissões.",
+                "Operation not authorized. Check your credentials and permissions.",
+                "Operación no autorizada. Compruebe sus credenciales y permisos.",
+            )).into_response()
         }
         Err(_) => (StatusCode::BAD_GATEWAY,
-            "Não foi possível confirmar o resultado. Confira o estado da operação antes de repetir.").into_response(),
+            t(
+                "Não foi possível confirmar o resultado. Confira o estado da operação antes de repetir.",
+                "The result could not be confirmed. Check the state of the operation before repeating it.",
+                "No se pudo confirmar el resultado. Compruebe el estado de la operación antes de repetirla.",
+            )).into_response(),
     }
 }

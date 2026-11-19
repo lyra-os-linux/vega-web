@@ -14,6 +14,8 @@ pub async fn handler(
     jar: PrivateCookieJar,
     Extension(user): Extension<CurrentUser>,
 ) -> Html<String> {
+    let lang = user.lang;
+    let t = move |pt: &'static str, en: &'static str, es: &'static str| lang.text(pt, en, es);
     let actions = Actions::new(&state, &jar, &user);
     let client = state.dbus.datetime();
     let body = match client.status().await {
@@ -25,18 +27,30 @@ pub async fn handler(
 {}
 {}
 </div>"#,
-                icon_stat("datetime", "Fuso horário", &html_escape(&status.timezone)),
+                icon_stat(
+                    "datetime",
+                    t("Fuso horário", "Time zone", "Zona horaria"),
+                    &html_escape(&status.timezone)
+                ),
                 icon_stat(
                     if status.ntp { "check" } else { "warning" },
                     "NTP",
                     &format!(
                         r#"<span class="badge {}">{}</span>"#,
                         if status.ntp { "on" } else { "off" },
-                        if status.ntp { "ativo" } else { "inativo" },
+                        if status.ntp {
+                            t("ativo", "active", "activo")
+                        } else {
+                            t("inativo", "inactive", "inactivo")
+                        },
                     )
                 ),
                 icon_stat("users", "Locale", &html_escape(&status.locale)),
-                icon_stat("hardware", "Teclado", &html_escape(&status.keymap)),
+                icon_stat(
+                    "hardware",
+                    t("Teclado", "Keyboard", "Teclado"),
+                    &html_escape(&status.keymap)
+                ),
             );
             let form = if actions.enabled() {
                 let timezones = client.list_timezones().await.unwrap_or_default();
@@ -55,21 +69,45 @@ pub async fn handler(
                     })
                     .collect();
                 let inner = format!(
-                    r#"<label>Fuso horário<select name="timezone">{options}</select></label>
-<label>Sincronização automática (NTP)<select name="ntp"><option value="true"{}>Ativada</option><option value="false"{}>Desativada</option></select></label>"#,
+                    r#"<label>{}<select name="timezone">{options}</select></label>
+<label>{}<select name="ntp"><option value="true"{}>{}</option><option value="false"{}>{}</option></select></label>"#,
+                    t("Fuso horário", "Time zone", "Zona horaria"),
+                    t(
+                        "Sincronização automática (NTP)",
+                        "Automatic synchronization (NTP)",
+                        "Sincronización automática (NTP)",
+                    ),
                     if status.ntp { " selected" } else { "" },
+                    t("Ativada", "Enabled", "Activada"),
                     if status.ntp { "" } else { " selected" },
+                    t("Desativada", "Disabled", "Desactivada"),
                 );
                 format!(
-                    "<h3>Alterar</h3>{}",
-                    actions.inline_form("Aplicar", "datetime", &inner)
+                    "<h3>{}</h3>{}",
+                    t("Alterar", "Change", "Cambiar"),
+                    actions.inline_form(t("Aplicar", "Apply", "Aplicar"), "datetime", &inner)
                 )
             } else {
                 actions.notice()
             };
             format!("{cards}{form}")
         }
-        Err(error) => error_body("Status de data/hora indisponível", error),
+        Err(error) => error_body(
+            lang,
+            t(
+                "Status de data/hora indisponível",
+                "Date/time status unavailable",
+                "Estado de fecha/hora no disponible",
+            ),
+            error,
+        ),
     };
-    render_with("Data e Hora", "/data-hora", &user, "", "", body)
+    render_with(
+        t("Data e Hora", "Date and Time", "Fecha y Hora"),
+        "/data-hora",
+        &user,
+        "",
+        "",
+        body,
+    )
 }

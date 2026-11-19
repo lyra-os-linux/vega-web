@@ -378,120 +378,259 @@ impl Operation {
         }
     }
 
-    /// Human description (pt-BR) for the confirmation dialog and the result page.
+    /// Human description (pt-BR) for the audit trail and the journal.
     pub fn describe(&self) -> String {
+        self.describe_in(crate::lang::Lang::Pt)
+    }
+
+    /// Human description in the session's language, for the confirmation
+    /// dialog and the result page.
+    pub fn describe_in(&self, lang: crate::lang::Lang) -> String {
+        let t = |pt: &'static str, en: &'static str, es: &'static str| lang.text(pt, en, es);
         let proto = |tcp: &bool| if *tcp { "tcp" } else { "udp" };
         match self {
-            Self::InstallNative(name) => format!("Instalar o pacote {name}"),
-            Self::AddPort { port, tcp } => {
-                format!("Abrir a porta {port}/{} no firewall", proto(tcp))
-            }
-            Self::RemovePort { port, tcp } => {
-                format!("Fechar a porta {port}/{} no firewall", proto(tcp))
-            }
+            Self::InstallNative(name) => format!(
+                "{} {name}",
+                t(
+                    "Instalar o pacote",
+                    "Install the package",
+                    "Instalar el paquete"
+                )
+            ),
+            Self::AddPort { port, tcp } => format!(
+                "{} {port}/{} {}",
+                t("Abrir a porta", "Open port", "Abrir el puerto"),
+                proto(tcp),
+                t("no firewall", "in the firewall", "en el firewall")
+            ),
+            Self::RemovePort { port, tcp } => format!(
+                "{} {port}/{} {}",
+                t("Fechar a porta", "Close port", "Cerrar el puerto"),
+                proto(tcp),
+                t("no firewall", "in the firewall", "en el firewall")
+            ),
             Self::FirewallService {
                 name,
                 enabled: true,
-            } => {
-                format!("Permitir o serviço {name} no firewall")
-            }
+            } => format!(
+                "{} {name} {}",
+                t(
+                    "Permitir o serviço",
+                    "Allow the service",
+                    "Permitir el servicio"
+                ),
+                t("no firewall", "in the firewall", "en el firewall")
+            ),
             Self::FirewallService {
                 name,
                 enabled: false,
-            } => {
-                format!("Bloquear o serviço {name} no firewall")
-            }
+            } => format!(
+                "{} {name} {}",
+                t(
+                    "Bloquear o serviço",
+                    "Block the service",
+                    "Bloquear el servicio"
+                ),
+                t("no firewall", "in the firewall", "en el firewall")
+            ),
             Self::ServiceEnabled {
                 name,
                 enabled: true,
-            } => {
-                format!("Habilitar {name} na inicialização")
-            }
+            } => format!(
+                "{} {name} {}",
+                t("Habilitar", "Enable", "Habilitar"),
+                t("na inicialização", "at startup", "al inicio")
+            ),
             Self::ServiceEnabled {
                 name,
                 enabled: false,
-            } => {
-                format!("Desabilitar {name} na inicialização")
-            }
+            } => format!(
+                "{} {name} {}",
+                t("Desabilitar", "Disable", "Deshabilitar"),
+                t("na inicialização", "at startup", "al inicio")
+            ),
             Self::ServiceRunning {
                 name,
                 running: true,
-            } => format!("Iniciar {name}"),
+            } => format!("{} {name}", t("Iniciar", "Start", "Iniciar")),
             Self::ServiceRunning {
                 name,
                 running: false,
-            } => format!("Parar {name}"),
-            Self::ServiceRestart(name) => format!("Reiniciar {name}"),
-            Self::UpdateAllNative => "Aplicar todas as atualizações disponíveis".to_owned(),
-            Self::RemoveNative(name) => format!("Remover o pacote {name}"),
+            } => format!("{} {name}", t("Parar", "Stop", "Detener")),
+            Self::ServiceRestart(name) => {
+                format!("{} {name}", t("Reiniciar", "Restart", "Reiniciar"))
+            }
+            Self::UpdateAllNative => t(
+                "Aplicar todas as atualizações disponíveis",
+                "Apply all available updates",
+                "Aplicar todas las actualizaciones disponibles",
+            )
+            .to_owned(),
+            Self::RemoveNative(name) => format!(
+                "{} {name}",
+                t(
+                    "Remover o pacote",
+                    "Remove the package",
+                    "Quitar el paquete"
+                )
+            ),
             Self::RepoEnabled {
                 name,
                 enabled: true,
-            } => format!("Habilitar o repositório {name}"),
+            } => format!(
+                "{} {name}",
+                t(
+                    "Habilitar o repositório",
+                    "Enable the repository",
+                    "Habilitar el repositorio"
+                )
+            ),
             Self::RepoEnabled {
                 name,
                 enabled: false,
-            } => {
-                format!("Desabilitar o repositório {name}")
-            }
-            Self::ClearNativeCache => "Limpar o cache de pacotes".to_owned(),
+            } => format!(
+                "{} {name}",
+                t(
+                    "Desabilitar o repositório",
+                    "Disable the repository",
+                    "Deshabilitar el repositorio"
+                )
+            ),
+            Self::ClearNativeCache => t(
+                "Limpar o cache de pacotes",
+                "Clear the package cache",
+                "Limpiar la caché de paquetes",
+            )
+            .to_owned(),
             Self::SetAdmin {
                 username,
                 admin: true,
-            } => {
-                format!("Tornar {username} administrador")
-            }
+            } => match lang {
+                crate::lang::Lang::Pt => format!("Tornar {username} administrador"),
+                crate::lang::Lang::En => format!("Make {username} an administrator"),
+                crate::lang::Lang::Es => format!("Hacer administrador a {username}"),
+            },
             Self::SetAdmin {
                 username,
                 admin: false,
-            } => {
-                format!("Retirar {username} dos administradores")
-            }
-            Self::DateTime { timezone, ntp } => format!(
-                "Definir o fuso horário {timezone} e {} a sincronização automática (NTP)",
-                if *ntp { "ativar" } else { "desativar" }
-            ),
-            Self::Read(query) => query.describe().to_owned(),
+            } => match lang {
+                crate::lang::Lang::Pt => format!("Retirar {username} dos administradores"),
+                crate::lang::Lang::En => format!("Remove {username} from the administrators"),
+                crate::lang::Lang::Es => format!("Quitar a {username} de los administradores"),
+            },
+            Self::DateTime { timezone, ntp } => match lang {
+                crate::lang::Lang::Pt => format!(
+                    "Definir o fuso horário {timezone} e {} a sincronização automática (NTP)",
+                    if *ntp { "ativar" } else { "desativar" }
+                ),
+                crate::lang::Lang::En => format!(
+                    "Set the time zone {timezone} and {} automatic synchronization (NTP)",
+                    if *ntp { "enable" } else { "disable" }
+                ),
+                crate::lang::Lang::Es => format!(
+                    "Definir la zona horaria {timezone} y {} la sincronización automática (NTP)",
+                    if *ntp { "activar" } else { "desactivar" }
+                ),
+            },
+            Self::Read(query) => query.describe_in(lang).to_owned(),
             Self::DiagnosticsStart(tests) => format!(
-                "Executar o diagnóstico de saúde: {}",
+                "{}: {}",
+                t(
+                    "Executar o diagnóstico de saúde",
+                    "Run the health diagnostics",
+                    "Ejecutar el diagnóstico de salud"
+                ),
                 tests
                     .iter()
-                    .map(|id| crate::diagnostics_text::test_name(crate::lang::Lang::Pt, id))
+                    .map(|id| crate::diagnostics_text::test_name(lang, id))
                     .collect::<Vec<_>>()
                     .join(", ")
             ),
-            Self::NetworkCheck => "Testar a conexão com a internet".to_owned(),
+            Self::NetworkCheck => t(
+                "Testar a conexão com a internet",
+                "Test the internet connection",
+                "Probar la conexión a internet",
+            )
+            .to_owned(),
             Self::DiagnosticsReport {
                 job: 0,
                 redact: false,
-            } => "Ler o último relatório do diagnóstico (inclui trechos do journal)".to_owned(),
-            Self::DiagnosticsReport { job, redact: false } => {
-                format!("Ler o relatório do diagnóstico {job} (inclui trechos do journal)")
-            }
-            Self::DiagnosticsReport { job, redact: true } => {
-                format!("Ler o relatório redigido do diagnóstico {job} para pedir ajuda")
-            }
+            } => t(
+                "Ler o último relatório do diagnóstico (inclui trechos do journal)",
+                "Read the last diagnostics report (includes journal excerpts)",
+                "Leer el último informe del diagnóstico (incluye fragmentos del journal)",
+            )
+            .to_owned(),
+            Self::DiagnosticsReport { job, redact: false } => match lang {
+                crate::lang::Lang::Pt => {
+                    format!("Ler o relatório do diagnóstico {job} (inclui trechos do journal)")
+                }
+                crate::lang::Lang::En => {
+                    format!("Read diagnostics report {job} (includes journal excerpts)")
+                }
+                crate::lang::Lang::Es => format!(
+                    "Leer el informe del diagnóstico {job} (incluye fragmentos del journal)"
+                ),
+            },
+            Self::DiagnosticsReport { job, redact: true } => match lang {
+                crate::lang::Lang::Pt => {
+                    format!("Ler o relatório redigido do diagnóstico {job} para pedir ajuda")
+                }
+                crate::lang::Lang::En => {
+                    format!("Read the redacted diagnostics report {job} to ask for help")
+                }
+                crate::lang::Lang::Es => {
+                    format!("Leer el informe anonimizado del diagnóstico {job} para pedir ayuda")
+                }
+            },
             Self::RepairFindings { findings, .. } => format!(
-                "Corrigir {} achado(s) do diagnóstico (um snapshot é criado antes)",
-                findings.len()
+                "{} {} {}",
+                t("Corrigir", "Fix", "Corregir"),
+                findings.len(),
+                t(
+                    "achado(s) do diagnóstico (um snapshot é criado antes)",
+                    "diagnostics finding(s) (a snapshot is created first)",
+                    "hallazgo(s) del diagnóstico (antes se crea una instantánea)",
+                )
             ),
-            Self::MarkLogsSeen(job) => {
-                format!("Marcar como vistos os logs registrados até o diagnóstico {job}")
-            }
-            Self::SetPeriodic { enabled: false, .. } => {
-                "Desligar a verificação periódica".to_owned()
-            }
+            Self::MarkLogsSeen(job) => match lang {
+                crate::lang::Lang::Pt => {
+                    format!("Marcar como vistos os logs registrados até o diagnóstico {job}")
+                }
+                crate::lang::Lang::En => {
+                    format!("Mark the logs recorded up to diagnostics {job} as seen")
+                }
+                crate::lang::Lang::Es => {
+                    format!("Marcar como vistos los registros anotados hasta el diagnóstico {job}")
+                }
+            },
+            Self::SetPeriodic { enabled: false, .. } => t(
+                "Desligar a verificação periódica",
+                "Turn off the periodic check",
+                "Desactivar la comprobación periódica",
+            )
+            .to_owned(),
             Self::SetPeriodic {
                 enabled: true,
                 daily,
             } => format!(
-                "Ligar a verificação periódica, {}",
-                if *daily { "todo dia" } else { "toda semana" }
+                "{}, {}",
+                t(
+                    "Ligar a verificação periódica",
+                    "Turn on the periodic check",
+                    "Activar la comprobación periódica"
+                ),
+                if *daily {
+                    t("todo dia", "every day", "todos los días")
+                } else {
+                    t("toda semana", "every week", "todas las semanas")
+                }
             ),
             Self::CleanupClean(ids) => format!(
-                "Liberar espaço: {}",
+                "{}: {}",
+                t("Liberar espaço", "Free up space", "Liberar espacio"),
                 ids.iter()
-                    .map(|id| crate::diagnostics_text::cleanup_name(crate::lang::Lang::Pt, id))
+                    .map(|id| crate::diagnostics_text::cleanup_name(lang, id))
                     .collect::<Vec<_>>()
                     .join(", ")
             ),
@@ -815,6 +954,18 @@ pub async fn execute(path: &Path, request: Request) -> io::Result<Completed> {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn describe_in_follows_the_session_language() {
+        use crate::lang::Lang;
+        let op = Operation::ServiceRestart("sshd".into());
+        assert_eq!(op.describe(), "Reiniciar sshd");
+        assert_eq!(op.describe_in(Lang::En), "Restart sshd");
+        assert_eq!(op.describe_in(Lang::Es), "Reiniciar sshd");
+        let read = Operation::Read(ReadQuery::Snapshots);
+        assert_eq!(read.describe_in(Lang::En), "Read the snapshot list");
+    }
+
     use super::*;
 
     /// Code 3 belonged to the retired NVIDIA installation. It stays reserved:

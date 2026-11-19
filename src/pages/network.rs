@@ -15,6 +15,8 @@ pub async fn handler(
     jar: PrivateCookieJar,
     Extension(user): Extension<CurrentUser>,
 ) -> Html<String> {
+    let lang = user.lang;
+    let t = move |pt: &'static str, en: &'static str, es: &'static str| lang.text(pt, en, es);
     let actions = Actions::new(&state, &jar, &user);
     let mut body = actions.notice();
     let net = state.dbus.network();
@@ -36,10 +38,20 @@ pub async fn handler(
                 .collect();
             body.push_str(&format!(
                 r#"<h3>Interfaces</h3>
-<table><thead><tr><th>Nome</th><th>Estado</th><th>IPv4</th><th>MAC</th></tr></thead><tbody>{rows}</tbody></table>"#
+<table><thead><tr><th>{}</th><th>{}</th><th>IPv4</th><th>MAC</th></tr></thead><tbody>{rows}</tbody></table>"#,
+                t("Nome", "Name", "Nombre"),
+                t("Estado", "State", "Estado"),
             ));
         }
-        Err(error) => body.push_str(&error_body("Lista de interfaces indisponível", error)),
+        Err(error) => body.push_str(&error_body(
+            lang,
+            t(
+                "Lista de interfaces indisponível",
+                "Interface list unavailable",
+                "Lista de interfaces no disponible",
+            ),
+            error,
+        )),
     }
 
     match net.wifi().await {
@@ -54,17 +66,31 @@ pub async fn handler(
                         network.signal,
                         bar(network.signal as f64),
                         if network.active { "on" } else { "off" },
-                        if network.active { "conectada" } else { "" },
+                        if network.active {
+                            t("conectada", "connected", "conectada")
+                        } else {
+                            ""
+                        },
                     )
                 })
                 .collect();
             body.push_str(&format!(
                 r#"<h3>Wi-Fi</h3>
-<table><thead><tr><th>SSID</th><th>Segurança</th><th>Sinal</th><th></th></tr></thead><tbody>{rows}</tbody></table>"#
+<table><thead><tr><th>SSID</th><th>{}</th><th>{}</th><th></th></tr></thead><tbody>{rows}</tbody></table>"#,
+                t("Segurança", "Security", "Seguridad"),
+                t("Sinal", "Signal", "Señal"),
             ));
         }
         Ok(_) => {}
-        Err(error) => body.push_str(&error_body("Lista de redes Wi-Fi indisponível", error)),
+        Err(error) => body.push_str(&error_body(
+            lang,
+            t(
+                "Lista de redes Wi-Fi indisponível",
+                "Wi-Fi network list unavailable",
+                "Lista de redes Wi-Fi no disponible",
+            ),
+            error,
+        )),
     }
 
     match net.proxy().await {
@@ -84,12 +110,31 @@ pub async fn handler(
             ));
         }
         Ok(_) => {}
-        Err(error) => body.push_str(&error_body("Configuração de proxy indisponível", error)),
+        Err(error) => body.push_str(&error_body(
+            lang,
+            t(
+                "Configuração de proxy indisponível",
+                "Proxy configuration unavailable",
+                "Configuración de proxy no disponible",
+            ),
+            error,
+        )),
     }
 
-    body.push_str(
-        r#"<div class="notice"><strong>Minha internet não funciona</strong><span>Testa a conexão passo a passo, do cabo até a internet, e aponta onde está o problema.</span><a class="button-link" href="/rede/internet">Testar a conexão</a></div>"#,
-    );
+    body.push_str(&format!(
+        r#"<div class="notice"><strong>{}</strong><span>{}</span><a class="button-link" href="/rede/internet">{}</a></div>"#,
+        t(
+            "Minha internet não funciona",
+            "My internet does not work",
+            "Mi internet no funciona",
+        ),
+        t(
+            "Testa a conexão passo a passo, do cabo até a internet, e aponta onde está o problema.",
+            "Tests the connection step by step, from the cable to the internet, and points out where the problem is.",
+            "Prueba la conexión paso a paso, del cable a internet, e indica dónde está el problema.",
+        ),
+        t("Testar a conexão", "Test the connection", "Probar la conexión"),
+    ));
 
     let firewall = state.dbus.firewall();
     match firewall.status().await {
@@ -101,16 +146,32 @@ pub async fn handler(
 </div>"#,
             icon_stat(
                 "firewall",
-                "Estado",
+                t("Estado", "State", "Estado"),
                 &format!(
                     r#"<span class="badge {}">{}</span>"#,
                     if status.enabled { "on" } else { "off" },
-                    if status.enabled { "ativo" } else { "inativo" },
+                    if status.enabled {
+                        t("ativo", "active", "activo")
+                    } else {
+                        t("inativo", "inactive", "inactivo")
+                    },
                 )
             ),
-            icon_stat("network", "Zona ativa", &html_escape(&status.active_zone)),
+            icon_stat(
+                "network",
+                t("Zona ativa", "Active zone", "Zona activa"),
+                &html_escape(&status.active_zone)
+            ),
         )),
-        Err(error) => body.push_str(&error_body("Status do firewall indisponível", error)),
+        Err(error) => body.push_str(&error_body(
+            lang,
+            t(
+                "Status do firewall indisponível",
+                "Firewall status unavailable",
+                "Estado del firewall no disponible",
+            ),
+            error,
+        )),
     }
 
     let lists = match cached_read::<Firewall>(&state, &jar, ReadQuery::Firewall) {
@@ -143,13 +204,13 @@ pub async fn handler(
                 .map(|service| {
                     let toggle = if service.enabled {
                         actions.button(
-                            "Bloquear",
+                            t("Bloquear", "Block", "Bloquear"),
                             "firewall-service",
                             &[("name", &service.name), ("enabled", "false")],
                         )
                     } else {
                         actions.button(
-                            "Permitir",
+                            t("Permitir", "Allow", "Permitir"),
                             "firewall-service",
                             &[("name", &service.name), ("enabled", "true")],
                         )
@@ -160,21 +221,23 @@ pub async fn handler(
                         html_escape(&service.name),
                         if service.enabled { "on" } else { "off" },
                         if service.enabled {
-                            "permitido"
+                            t("permitido", "allowed", "permitido")
                         } else {
-                            "bloqueado"
+                            t("bloqueado", "blocked", "bloqueado")
                         },
                     )
                 })
                 .collect();
             body.push_str(&format!(
-                r#"<table><thead><tr><th>Serviço</th><th>Estado</th><th></th></tr></thead><tbody>{rows}</tbody></table>"#
+                r#"<table><thead><tr><th>{}</th><th>{}</th><th></th></tr></thead><tbody>{rows}</tbody></table>"#,
+                t("Serviço", "Service", "Servicio"),
+                t("Estado", "State", "Estado"),
             ));
             let rows: String = ports
                 .iter()
                 .map(|rule| {
                     let close = actions.button(
-                        "Fechar",
+                        t("Fechar", "Close", "Cerrar"),
                         "remove-port",
                         &[("port", &rule.port), ("protocol", &rule.protocol)],
                     );
@@ -186,30 +249,77 @@ pub async fn handler(
                 })
                 .collect();
             let table = if rows.is_empty() {
-                r#"<p class="empty">Nenhuma regra de porta personalizada.</p>"#.to_owned()
+                format!(
+                    r#"<p class="empty">{}</p>"#,
+                    t(
+                        "Nenhuma regra de porta personalizada.",
+                        "No custom port rule.",
+                        "Ninguna regla de puerto personalizada.",
+                    )
+                )
             } else {
                 format!(
-                    r#"<table><thead><tr><th>Porta</th><th>Protocolo</th><th></th></tr></thead><tbody>{rows}</tbody></table>"#
+                    r#"<table><thead><tr><th>{}</th><th>{}</th><th></th></tr></thead><tbody>{rows}</tbody></table>"#,
+                    t("Porta", "Port", "Puerto"),
+                    t("Protocolo", "Protocol", "Protocolo"),
                 )
             };
-            body.push_str(&format!("<h3>Regras de porta personalizadas</h3>{table}"));
+            body.push_str(&format!(
+                "<h3>{}</h3>{table}",
+                t(
+                    "Regras de porta personalizadas",
+                    "Custom port rules",
+                    "Reglas de puerto personalizadas",
+                )
+            ));
         }
         Err(error) if actions.enabled() => {
-            body.push_str(&actions.unlock(ReadQuery::Firewall, "Serviços e portas do firewall"));
-            body.push_str(&error_body("Leitura direta recusada", error));
+            body.push_str(&actions.unlock(
+                ReadQuery::Firewall,
+                t(
+                    "Serviços e portas do firewall",
+                    "Firewall services and ports",
+                    "Servicios y puertos del firewall",
+                ),
+            ));
+            body.push_str(&error_body(
+                lang,
+                t(
+                    "Leitura direta recusada",
+                    "Direct read refused",
+                    "Lectura directa rechazada",
+                ),
+                error,
+            ));
         }
         Err(error) => body.push_str(&error_body(
-            "Serviços e portas do firewall indisponíveis",
+            lang,
+            t(
+                "Serviços e portas do firewall indisponíveis",
+                "Firewall services and ports unavailable",
+                "Servicios y puertos del firewall no disponibles",
+            ),
             error,
         )),
     }
     if actions.enabled() {
         body.push_str(&actions.inline_form(
-            "Abrir porta",
+            t("Abrir porta", "Open port", "Abrir puerto"),
             "add-port",
-            r#"<label>Porta<input type="number" name="port" min="1" max="65535" required></label><label>Protocolo<select name="protocol"><option value="tcp">TCP</option><option value="udp">UDP</option></select></label>"#,
+            &format!(
+                r#"<label>{}<input type="number" name="port" min="1" max="65535" required></label><label>{}<select name="protocol"><option value="tcp">TCP</option><option value="udp">UDP</option></select></label>"#,
+                t("Porta", "Port", "Puerto"),
+                t("Protocolo", "Protocol", "Protocolo"),
+            ),
         ));
     }
 
-    render_with("Rede e Firewall", "/rede", &user, "", "", body)
+    render_with(
+        t("Rede e Firewall", "Network and Firewall", "Red y Firewall"),
+        "/rede",
+        &user,
+        "",
+        "",
+        body,
+    )
 }

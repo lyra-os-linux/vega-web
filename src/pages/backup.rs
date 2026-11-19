@@ -15,6 +15,8 @@ pub async fn handler(
     jar: PrivateCookieJar,
     Extension(user): Extension<CurrentUser>,
 ) -> Html<String> {
+    let lang = user.lang;
+    let t = move |pt: &'static str, en: &'static str, es: &'static str| lang.text(pt, en, es);
     let actions = Actions::new(&state, &jar, &user);
     // The session's own read (fetched with the user's identity) wins; the
     // direct query only works where the service account is allowed.
@@ -41,7 +43,14 @@ pub async fn handler(
     let body = match configs {
         Ok(BackupConfigs { configs }) => {
             if configs.is_empty() {
-                r#"<p class="empty">Nenhuma configuração de backup ainda.</p>"#.to_string()
+                format!(
+                    r#"<p class="empty">{}</p>"#,
+                    t(
+                        "Nenhuma configuração de backup ainda.",
+                        "No backup configuration yet.",
+                        "Todavía no hay ninguna configuración de copia de seguridad.",
+                    )
+                )
             } else {
                 let destinations = configs
                     .iter()
@@ -63,19 +72,52 @@ pub async fn handler(
                 format!(
                     r#"<div class="cards">{} {}</div>
 <table>
-<thead><tr><th>ID</th><th>Caminhos</th><th>Destino</th><th>Frequência</th></tr></thead>
+<thead><tr><th>ID</th><th>{}</th><th>{}</th><th>{}</th></tr></thead>
 <tbody>{rows}</tbody>
 </table>"#,
-                    icon_stat("backup", "Configurações", &configs.len().to_string()),
-                    icon_stat("storage", "Destinos", &destinations.to_string()),
+                    icon_stat(
+                        "backup",
+                        t("Configurações", "Configurations", "Configuraciones"),
+                        &configs.len().to_string()
+                    ),
+                    icon_stat(
+                        "storage",
+                        t("Destinos", "Destinations", "Destinos"),
+                        &destinations.to_string()
+                    ),
+                    t("Caminhos", "Paths", "Rutas"),
+                    t("Destino", "Destination", "Destino"),
+                    t("Frequência", "Frequency", "Frecuencia"),
                 )
             }
         }
         Err(error) if actions.enabled() => {
-            actions.unlock(ReadQuery::BackupConfigs, "Configurações de backup")
-                + &error_body("Leitura direta recusada", error)
+            actions.unlock(
+                ReadQuery::BackupConfigs,
+                t(
+                    "Configurações de backup",
+                    "Backup configurations",
+                    "Configuraciones de copia de seguridad",
+                ),
+            ) + &error_body(
+                lang,
+                t(
+                    "Leitura direta recusada",
+                    "Direct read refused",
+                    "Lectura directa rechazada",
+                ),
+                error,
+            )
         }
-        Err(error) => error_body("Lista de configurações de backup indisponível", error),
+        Err(error) => error_body(
+            lang,
+            t(
+                "Lista de configurações de backup indisponível",
+                "Backup configuration list unavailable",
+                "Lista de configuraciones de copia de seguridad no disponible",
+            ),
+            error,
+        ),
     };
     render_with("Backup", "/backup", &user, "", "", body)
 }

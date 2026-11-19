@@ -42,6 +42,8 @@ pub async fn handler(
     jar: PrivateCookieJar,
     Extension(user): Extension<CurrentUser>,
 ) -> Html<String> {
+    let lang = user.lang;
+    let t = move |pt: &'static str, en: &'static str, es: &'static str| lang.text(pt, en, es);
     let actions = Actions::new(&state, &jar, &user);
     let data = match cached_read::<Snapshots>(&state, &jar, ReadQuery::Snapshots) {
         Some(payload) => Ok(payload),
@@ -50,8 +52,14 @@ pub async fn handler(
     let body = match data {
         Ok(Snapshots {
             available: false, ..
-        }) => r#"<p class="empty">Sem suporte a snapshots (Snapper/Timeshift) nesta máquina.</p>"#
-            .to_string(),
+        }) => format!(
+            r#"<p class="empty">{}</p>"#,
+            t(
+                "Sem suporte a snapshots (Snapper/Timeshift) nesta máquina.",
+                "No snapshot support (Snapper/Timeshift) on this machine.",
+                "Sin soporte de instantáneas (Snapper/Timeshift) en esta máquina.",
+            )
+        ),
         Ok(Snapshots { mut snapshots, .. }) => {
             snapshots.sort_by_key(|snapshot| std::cmp::Reverse(snapshot.id));
             let rows: String = snapshots
@@ -67,21 +75,35 @@ pub async fn handler(
                 })
                 .collect();
             let table = if snapshots.is_empty() {
-                r#"<p class="empty">Nenhum snapshot ainda.</p>"#.to_owned()
+                format!(
+                    r#"<p class="empty">{}</p>"#,
+                    t(
+                        "Nenhum snapshot ainda.",
+                        "No snapshots yet.",
+                        "Todavía no hay instantáneas.",
+                    )
+                )
             } else {
                 format!(
                     r#"<table>
-<thead><tr><th>ID</th><th>Data</th><th>Origem</th><th>Descrição</th></tr></thead>
+<thead><tr><th>ID</th><th>{}</th><th>{}</th><th>{}</th></tr></thead>
 <tbody>{rows}</tbody>
-</table>"#
+</table>"#,
+                    t("Data", "Date", "Fecha"),
+                    t("Origem", "Origin", "Origen"),
+                    t("Descrição", "Description", "Descripción"),
                 )
             };
             format!(
                 r#"<div class="cards">{} {}</div>{table}"#,
-                icon_stat("snapshots", "Snapshots", &snapshots.len().to_string()),
+                icon_stat(
+                    "snapshots",
+                    t("Snapshots", "Snapshots", "Instantáneas"),
+                    &snapshots.len().to_string()
+                ),
                 icon_stat(
                     "datetime",
-                    "Mais recente",
+                    t("Mais recente", "Most recent", "Más reciente"),
                     &snapshots
                         .first()
                         .map(|snapshot| format_timestamp(snapshot.timestamp))
@@ -90,12 +112,37 @@ pub async fn handler(
             )
         }
         Err(error) if actions.enabled() => {
-            actions.unlock(ReadQuery::Snapshots, "Snapshots")
-                + &error_body("Leitura direta recusada", error)
+            actions.unlock(
+                ReadQuery::Snapshots,
+                t("Snapshots", "Snapshots", "Instantáneas"),
+            ) + &error_body(
+                lang,
+                t(
+                    "Leitura direta recusada",
+                    "Direct read refused",
+                    "Lectura directa rechazada",
+                ),
+                error,
+            )
         }
-        Err(error) => error_body("Lista de snapshots indisponível", error),
+        Err(error) => error_body(
+            lang,
+            t(
+                "Lista de snapshots indisponível",
+                "Snapshot list unavailable",
+                "Lista de instantáneas no disponible",
+            ),
+            error,
+        ),
     };
-    render_with("Snapshots", "/snapshots", &user, "", "", body)
+    render_with(
+        t("Snapshots", "Snapshots", "Instantáneas"),
+        "/snapshots",
+        &user,
+        "",
+        "",
+        body,
+    )
 }
 
 fn format_timestamp(unix_seconds: i64) -> String {
